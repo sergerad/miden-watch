@@ -29,21 +29,25 @@ use crate::event::EventHandler;
 #[derive(Parser)]
 #[command(name = "miden-watch", about = "Miden chain explorer TUI")]
 struct Cli {
-    /// Miden node RPC URL (e.g. http://localhost:57291)
-    #[arg(long = "url", env = "MIDEN_NODE_URL")]
+    /// Miden node RPC URL (e.g. https://rpc.testnet.miden.io)
+    #[arg(
+        long = "url",
+        env = "MIDEN_NODE_URL",
+        default_value = "http://localhost:57291"
+    )]
     url: String,
 
     /// Block number to start syncing from (default: latest)
     #[arg(long)]
     start_block: Option<u32>,
 
-    /// Path to SQLite database file
+    /// Path to SQLite database file (default: ~/.miden-watch/data.db)
     #[arg(long, default_value = None)]
     db_path: Option<PathBuf>,
 }
 
 fn parse_endpoint(url: &str) -> Result<Endpoint> {
-    // Parse URL like "http://localhost:57291" or "https://node.example.com:443"
+    // Parse URL like "http://localhost:57291" or "https://rpc.testnet.miden.io"
     let url = url::Url::parse(url)?;
     let protocol = url.scheme().to_string();
     let host = url
