@@ -1,12 +1,24 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::{App, Mode, Pane};
+use crate::app::{App, Mode};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
+    // Draw the outer border
+    let border = Block::default().borders(Borders::ALL);
+    let inner = border.inner(area);
+    frame.render_widget(border, area);
+
+    // Split inner area into left (status) and right (error)
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(38), Constraint::Min(1)])
+        .split(inner);
+
+    // Left column: mode | head | help
     let mode_span = match app.mode {
         Mode::Tailing => Span::styled(
             " TAILING ",
@@ -18,56 +30,33 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ),
     };
 
-    let block_info = if let Some(block) = app.blocks.first() {
+    let head_span = if let Some(block) = app.blocks.first() {
         Span::styled(
-            format!(" Block #{} ", block.block_num),
+            format!(" Head: #{} ", block.block_num),
             Style::default().fg(Color::Cyan),
         )
     } else {
-        Span::styled(
-            " Waiting for blocks... ",
-            Style::default().fg(Color::DarkGray),
-        )
+        Span::styled(" Head: -- ", Style::default().fg(Color::DarkGray))
     };
 
-    let blocks_count = Span::styled(
-        format!(" {} blocks ", app.blocks.len()),
-        Style::default().fg(Color::White),
-    );
+    let help_hint = Span::styled(" ?:help ", Style::default().fg(Color::DarkGray));
 
-    let nav_help = match app.active_pane {
-        Pane::BlockList => Span::styled(
-            " q:quit  j/k:navigate  Enter:detail  t:tail ",
-            Style::default().fg(Color::DarkGray),
-        ),
-        Pane::BlockDetail => Span::styled(
-            " q:quit  j/k:navigate  Enter:tx detail  Esc:back  t:tail ",
-            Style::default().fg(Color::DarkGray),
-        ),
-        Pane::TxDetail | Pane::NoteDetail => Span::styled(
-            " q:quit  j/k:scroll  Esc:back  t:tail ",
-            Style::default().fg(Color::DarkGray),
-        ),
-    };
-
-    let error_span = if let Some(ref err) = app.error {
-        Span::styled(format!(" ERR: {} ", err), Style::default().fg(Color::Red))
-    } else {
-        Span::raw("")
-    };
-
-    let line = Line::from(vec![
+    let left = Paragraph::new(Line::from(vec![
         mode_span,
         Span::raw(" | "),
-        block_info,
+        head_span,
         Span::raw(" | "),
-        blocks_count,
-        Span::raw(" | "),
-        nav_help,
-        error_span,
-    ]);
+        help_hint,
+    ]));
+    frame.render_widget(left, columns[0]);
 
-    let paragraph = Paragraph::new(line).block(Block::default().borders(Borders::ALL));
-
-    frame.render_widget(paragraph, area);
+    // Right column: error message (wraps across 2 lines if needed)
+    if let Some(ref err) = app.error {
+        let error = Paragraph::new(Span::styled(
+            format!("ERR: {}", err),
+            Style::default().fg(Color::Red),
+        ))
+        .wrap(Wrap { trim: false });
+        frame.render_widget(error, columns[1]);
+    }
 }

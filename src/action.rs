@@ -17,4 +17,11 @@ pub enum Action {
     SyncError(String),
     ScrollUp,
     ScrollDown,
+    HalfPageUp,
+    HalfPageDown,
+    GoToTop,
+    GoToBottom,
+    ToggleHelp,
+    NavBack,
+    NavForward,
 }
