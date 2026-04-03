@@ -1,0 +1,35 @@
+[package]
+name = "miden-watch"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "miden-watch"
+path = "src/main.rs"
+
+[dependencies]
+# Miden
+miden-client = { version = "0.14.0-alpha.2", features = ["std", "tonic"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Storage
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Error handling
+color-eyre = "0.6"
+
+# Time
+chrono = "0.4"
+
+# URL parsing
+url = "2"

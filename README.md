@@ -1,2 +1,3 @@
-# miden-blockrs
-TUI for observing Miden chain data
+# miden-watch
+
+TUI for observing Miden chain data.
