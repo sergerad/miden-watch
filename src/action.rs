@@ -8,7 +8,6 @@ pub enum Action {
     Down(usize),
     Enter,
     Back,
-    ToggleTailing,
     NewBlockReceived {
         block: BlockInfo,
         transactions: Vec<TransactionInfo>,

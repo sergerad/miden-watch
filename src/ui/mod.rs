@@ -103,10 +103,6 @@ fn render_help_popup(frame: &mut Frame) {
             Span::styled("Go back", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  t           ", key_style),
-            Span::styled("Toggle tailing mode", desc_style),
-        ]),
-        Line::from(vec![
             Span::styled("  /           ", key_style),
             Span::styled("Search by block number", desc_style),
         ]),
@@ -157,7 +153,7 @@ fn render_search_input(frame: &mut Frame, app: &App, area: Rect) {
     let input = app.search_input.as_deref().unwrap_or("");
     let text = format!("/ {input}█");
 
-    let width = (text.len() as u16 + 4).min(area.width);
+    let width = (text.len() as u16 + 4).max(20).min(area.width);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = area.y + area.height.saturating_sub(3);
     let input_area = Rect::new(x, y, width, 3);

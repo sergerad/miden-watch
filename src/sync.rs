@@ -33,28 +33,25 @@ pub async fn run_sync(
         },
     };
 
-    // Check if we already have data in the store
+    // Load cached blocks from the store into the UI
     {
         let store = store.lock().await;
-        if let Ok(Some(latest)) = store.get_latest_block_num() {
-            // Load cached blocks into UI
-            if let Ok(blocks) = store.get_blocks(100, 0) {
-                for block in blocks.into_iter().rev() {
-                    let block_num = block.block_num;
-                    let txs = store
-                        .get_transactions_for_block(block_num)
-                        .unwrap_or_default();
-                    let notes = store.get_notes_for_block(block_num).unwrap_or_default();
-                    let _ = action_tx.send(Action::NewBlockReceived {
-                        block,
-                        transactions: txs,
-                        notes,
-                    });
+        if let Ok(blocks) = store.get_blocks_from(current_block, stop_block) {
+            for block in blocks.into_iter().rev() {
+                let block_num = block.block_num;
+                let txs = store
+                    .get_transactions_for_block(block_num)
+                    .unwrap_or_default();
+                let notes = store.get_notes_for_block(block_num).unwrap_or_default();
+                let _ = action_tx.send(Action::NewBlockReceived {
+                    block,
+                    transactions: txs,
+                    notes,
+                });
+                // Skip past blocks we already have
+                if block_num >= current_block {
+                    current_block = block_num + 1;
                 }
-            }
-            // Continue from where we left off if the store is ahead
-            if latest >= current_block {
-                current_block = latest + 1;
             }
         }
     }

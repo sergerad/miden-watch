@@ -4,20 +4,9 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::{App, Mode};
+use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_span = match app.mode {
-        Mode::Tailing => Span::styled(
-            " TAILING ",
-            Style::default().fg(Color::Black).bg(Color::Green),
-        ),
-        Mode::Browsing => Span::styled(
-            " BROWSING ",
-            Style::default().fg(Color::Black).bg(Color::Yellow),
-        ),
-    };
-
     let head_span = if let Some(block) = app.blocks.first() {
         Span::styled(
             format!(" Head: #{} ", block.block_num),
@@ -29,13 +18,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let help_hint = Span::styled(" ?:help ", Style::default().fg(Color::DarkGray));
 
-    let mut top_spans = vec![
-        mode_span,
-        Span::raw(" | "),
-        head_span,
-        Span::raw(" | "),
-        help_hint,
-    ];
+    let mut top_spans = vec![head_span, Span::raw(" | "), help_hint];
 
     if let Some((current, target)) = app.sync_progress {
         top_spans.push(Span::raw("| "));

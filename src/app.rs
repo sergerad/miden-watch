@@ -11,12 +11,6 @@ use crate::event::Event;
 use crate::types::{BlockInfo, NoteInfo, TransactionInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Tailing,
-    Browsing,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
     BlockList,
     BlockDetail,
@@ -34,7 +28,6 @@ struct NavEntry {
 }
 
 pub struct App {
-    pub mode: Mode,
     pub active_pane: Pane,
     pub blocks: Vec<BlockInfo>,
     pub block_list_state: ListState,
@@ -70,7 +63,6 @@ pub struct App {
 impl App {
     pub fn new(action_tx: mpsc::UnboundedSender<Action>) -> Self {
         Self {
-            mode: Mode::Tailing,
             active_pane: Pane::BlockList,
             blocks: Vec::new(),
             block_list_state: ListState::default(),
@@ -227,7 +219,6 @@ impl App {
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
-                KeyCode::Char('t') => Some(Action::ToggleTailing),
                 KeyCode::Char('/') => {
                     self.search_input = Some(String::new());
                     None
@@ -242,7 +233,6 @@ impl App {
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
-                KeyCode::Char('t') => Some(Action::ToggleTailing),
                 _ => None,
             },
             Pane::TxDetail => match key.code {
@@ -252,7 +242,6 @@ impl App {
                 }
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::ScrollDown),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::ScrollUp),
-                KeyCode::Char('t') => Some(Action::ToggleTailing),
                 _ => None,
             },
             Pane::NoteDetail => match key.code {
@@ -262,7 +251,6 @@ impl App {
                 }
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::ScrollDown),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::ScrollUp),
-                KeyCode::Char('t') => Some(Action::ToggleTailing),
                 _ => None,
             },
         }
@@ -325,7 +313,6 @@ impl App {
                             let block_num = self.blocks[idx].block_num;
                             self.browse_block(block_num);
                             self.active_pane = Pane::BlockDetail;
-                            self.mode = Mode::Browsing;
                         }
                     }
                 }
@@ -362,9 +349,7 @@ impl App {
                     self.active_pane = Pane::BlockDetail;
                     self.detail_scroll = 0;
                 }
-                Pane::BlockList => {
-                    self.enter_tailing();
-                }
+                Pane::BlockList => {}
             },
             Action::NavBack => {
                 if let Some(entry) = self.nav_back.pop() {
@@ -378,24 +363,18 @@ impl App {
                     self.restore_nav(entry);
                 }
             }
-            Action::ToggleTailing => {
-                if self.mode == Mode::Tailing {
-                    self.mode = Mode::Browsing;
-                } else {
-                    self.enter_tailing();
-                }
-            }
             Action::NewBlockReceived {
                 block,
                 transactions,
                 notes,
             } => {
                 // Always insert the block into the list
+                let at_head = self.block_list_state.selected() == Some(0);
                 let selected_block_num = self.selected_block_num();
                 self.insert_block(block, transactions, notes);
 
-                if self.mode == Mode::Tailing {
-                    // Auto-select newest block
+                if at_head || self.blocks.len() == 1 {
+                    // Auto-scroll to newest block when already at head
                     self.block_list_state.select(Some(0));
                 } else if let Some(bn) = selected_block_num {
                     // Preserve the current selection by block number
@@ -414,7 +393,7 @@ impl App {
             Action::HalfPageUp => match self.active_pane {
                 Pane::BlockList => {
                     self.push_nav();
-                    self.mode = Mode::Browsing;
+
                     let current = self.block_list_state.selected().unwrap_or(0);
                     let target = current.saturating_sub(HALF_PAGE);
                     self.block_list_state.select(Some(target));
@@ -432,7 +411,7 @@ impl App {
                 Pane::BlockList => {
                     if !self.blocks.is_empty() {
                         self.push_nav();
-                        self.mode = Mode::Browsing;
+
                         let current = self.block_list_state.selected().unwrap_or(0);
                         let target = (current + HALF_PAGE).min(self.blocks.len() - 1);
                         self.block_list_state.select(Some(target));
@@ -453,7 +432,7 @@ impl App {
                 Pane::BlockList => {
                     if !self.blocks.is_empty() {
                         self.push_nav();
-                        self.mode = Mode::Browsing;
+
                         self.block_list_state.select(Some(0));
                     }
                 }
@@ -470,7 +449,7 @@ impl App {
                 Pane::BlockList => {
                     if !self.blocks.is_empty() {
                         self.push_nav();
-                        self.mode = Mode::Browsing;
+
                         self.block_list_state.select(Some(self.blocks.len() - 1));
                     }
                 }
@@ -486,7 +465,6 @@ impl App {
             },
             Action::SearchBlock(block_num) => {
                 self.push_nav();
-                self.mode = Mode::Browsing;
                 // Find the closest block: exact match or nearest lower
                 if let Some(idx) = self.blocks.iter().position(|b| b.block_num <= block_num) {
                     self.block_list_state.select(Some(idx));
@@ -544,10 +522,6 @@ impl App {
             self.selected_block_notes = self.block_notes.get(&bn).cloned().unwrap_or_default();
             self.tx_list_state = ListState::default();
             self.tx_list_state.select(entry.tx_list_selected);
-        }
-
-        if entry.pane != Pane::BlockList {
-            self.mode = Mode::Browsing;
         }
     }
 
@@ -614,20 +588,10 @@ impl App {
         }
     }
 
-    fn enter_tailing(&mut self) {
-        self.mode = Mode::Tailing;
-        self.active_pane = Pane::BlockList;
-        self.browsing_block_num = None;
-        if !self.blocks.is_empty() {
-            self.block_list_state.select(Some(0));
-        }
-    }
-
     fn select_next_block(&mut self, n: usize) {
         if self.blocks.is_empty() {
             return;
         }
-        self.mode = Mode::Browsing;
         let i = match self.block_list_state.selected() {
             Some(i) => (i + n).min(self.blocks.len() - 1),
             None => 0,
@@ -639,7 +603,6 @@ impl App {
         if self.blocks.is_empty() {
             return;
         }
-        self.mode = Mode::Browsing;
         let i = match self.block_list_state.selected() {
             Some(i) => i.saturating_sub(n),
             None => 0,

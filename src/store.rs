@@ -143,6 +143,41 @@ impl Store {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
+    pub fn get_blocks_from(
+        &self,
+        from_block: u32,
+        to_block: Option<u32>,
+    ) -> Result<Vec<BlockInfo>> {
+        let upper = to_block.unwrap_or(u32::MAX);
+        let mut stmt = self.conn.prepare(
+            "SELECT b.block_num, b.timestamp, b.version, b.prev_block_commitment,
+                    b.chain_commitment, b.account_root, b.nullifier_root, b.note_root,
+                    b.tx_commitment, b.tx_kernel_commitment,
+                    (SELECT COUNT(*) FROM transactions t WHERE t.block_num = b.block_num) as tx_count,
+                    (SELECT COUNT(*) FROM notes n WHERE n.block_num = b.block_num) as note_count
+             FROM blocks b
+             WHERE b.block_num >= ?1 AND b.block_num <= ?2
+             ORDER BY b.block_num DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![from_block, upper], |row| {
+            Ok(BlockInfo {
+                block_num: row.get(0)?,
+                timestamp: row.get(1)?,
+                version: row.get(2)?,
+                prev_block_commitment: row.get(3)?,
+                chain_commitment: row.get(4)?,
+                account_root: row.get(5)?,
+                nullifier_root: row.get(6)?,
+                note_root: row.get(7)?,
+                tx_commitment: row.get(8)?,
+                tx_kernel_commitment: row.get(9)?,
+                tx_count: row.get::<_, i64>(10)? as usize,
+                note_count: row.get::<_, i64>(11)? as usize,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     pub fn get_transactions_for_block(&self, block_num: u32) -> Result<Vec<TransactionInfo>> {
         let mut stmt = self.conn.prepare(
             "SELECT tx_id, account_id, block_num, input_note_count, output_note_count
