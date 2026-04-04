@@ -213,6 +213,100 @@ impl Store {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
+    /// Count blocks in a range (for progress reporting)
+    pub fn count_blocks_in_range(&self, from_block: u32, to_block: Option<u32>) -> Result<u32> {
+        let upper = to_block.unwrap_or(u32::MAX);
+        let count: u32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM blocks WHERE block_num >= ?1 AND block_num <= ?2",
+            rusqlite::params![from_block, upper],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Load a page of blocks (oldest-first) with tx/note counts.
+    /// Returns blocks ordered by block_num ASC.
+    pub fn get_blocks_page(
+        &self,
+        from_block: u32,
+        to_block: Option<u32>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<BlockInfo>> {
+        let upper = to_block.unwrap_or(u32::MAX);
+        let mut stmt = self.conn.prepare(
+            "SELECT b.block_num, b.timestamp, b.version, b.prev_block_commitment,
+                    b.chain_commitment, b.account_root, b.nullifier_root, b.note_root,
+                    b.tx_commitment, b.tx_kernel_commitment,
+                    (SELECT COUNT(*) FROM transactions t WHERE t.block_num = b.block_num) as tx_count,
+                    (SELECT COUNT(*) FROM notes n WHERE n.block_num = b.block_num) as note_count
+             FROM blocks b
+             WHERE b.block_num >= ?1 AND b.block_num <= ?2
+             ORDER BY b.block_num ASC
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![from_block, upper, limit, offset], |row| {
+            Ok(BlockInfo {
+                block_num: row.get(0)?,
+                timestamp: row.get(1)?,
+                version: row.get(2)?,
+                prev_block_commitment: row.get(3)?,
+                chain_commitment: row.get(4)?,
+                account_root: row.get(5)?,
+                nullifier_root: row.get(6)?,
+                note_root: row.get(7)?,
+                tx_commitment: row.get(8)?,
+                tx_kernel_commitment: row.get(9)?,
+                tx_count: row.get::<_, i64>(10)? as usize,
+                note_count: row.get::<_, i64>(11)? as usize,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Load transactions for a range of blocks in one query
+    pub fn get_transactions_for_blocks(
+        &self,
+        from_block: u32,
+        to_block: u32,
+    ) -> Result<Vec<TransactionInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT tx_id, account_id, block_num, input_note_count, output_note_count
+             FROM transactions WHERE block_num >= ?1 AND block_num <= ?2
+             ORDER BY block_num ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![from_block, to_block], |row| {
+            Ok(TransactionInfo {
+                tx_id: row.get(0)?,
+                account_id: row.get(1)?,
+                block_num: row.get(2)?,
+                input_note_count: row.get::<_, i64>(3)? as usize,
+                output_note_count: row.get::<_, i64>(4)? as usize,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Load notes for a range of blocks in one query
+    pub fn get_notes_for_blocks(&self, from_block: u32, to_block: u32) -> Result<Vec<NoteInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT note_id, block_num, sender, note_type, tag, note_index
+             FROM notes WHERE block_num >= ?1 AND block_num <= ?2
+             ORDER BY block_num ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![from_block, to_block], |row| {
+            Ok(NoteInfo {
+                note_id: row.get(0)?,
+                block_num: row.get(1)?,
+                sender: row.get(2)?,
+                note_type: row.get(3)?,
+                tag: row.get(4)?,
+                note_index: row.get(5)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     pub fn get_latest_block_num(&self) -> Result<Option<u32>> {
         let result = self
             .conn

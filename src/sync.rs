@@ -33,30 +33,73 @@ pub async fn run_sync(
         },
     };
 
-    // Load cached blocks from the store into the UI
+    // Load cached blocks from the store into the UI in batches
     {
+        const BATCH_SIZE: u32 = 500;
         let store = store.lock().await;
-        if let Ok(blocks) = store.get_blocks_from(current_block, stop_block) {
-            let total = blocks.len() as u32;
-            // blocks are ordered newest-first, reverse to process oldest-first
-            for (i, block) in blocks.into_iter().rev().enumerate() {
-                let block_num = block.block_num;
+        let total = store
+            .count_blocks_in_range(current_block, stop_block)
+            .unwrap_or(0);
+
+        if total > 0 {
+            let mut loaded: u32 = 0;
+            let mut offset: u32 = 0;
+
+            loop {
+                let blocks = store
+                    .get_blocks_page(current_block, stop_block, BATCH_SIZE, offset)
+                    .unwrap_or_default();
+                if blocks.is_empty() {
+                    break;
+                }
+
+                // Get block num range for batch tx/note loading
+                let batch_min = blocks.first().unwrap().block_num;
+                let batch_max = blocks.last().unwrap().block_num;
+
+                let all_txs = store
+                    .get_transactions_for_blocks(batch_min, batch_max)
+                    .unwrap_or_default();
+                let all_notes = store
+                    .get_notes_for_blocks(batch_min, batch_max)
+                    .unwrap_or_default();
+
+                // Group txs and notes by block_num
+                let mut txs_by_block: std::collections::HashMap<u32, Vec<_>> =
+                    std::collections::HashMap::new();
+                for tx in all_txs {
+                    txs_by_block.entry(tx.block_num).or_default().push(tx);
+                }
+                let mut notes_by_block: std::collections::HashMap<u32, Vec<_>> =
+                    std::collections::HashMap::new();
+                for note in all_notes {
+                    notes_by_block.entry(note.block_num).or_default().push(note);
+                }
+
+                let batch_len = blocks.len() as u32;
+                for block in blocks {
+                    let block_num = block.block_num;
+                    let txs = txs_by_block.remove(&block_num).unwrap_or_default();
+                    let notes = notes_by_block.remove(&block_num).unwrap_or_default();
+                    let _ = action_tx.send(Action::NewBlockReceived {
+                        block,
+                        transactions: txs,
+                        notes,
+                    });
+                    if block_num == current_block {
+                        current_block = block_num + 1;
+                    }
+                }
+
+                loaded += batch_len;
                 let _ = action_tx.send(Action::LoadProgress {
-                    current: i as u32 + 1,
+                    current: loaded,
                     target: total,
                 });
-                let txs = store
-                    .get_transactions_for_block(block_num)
-                    .unwrap_or_default();
-                let notes = store.get_notes_for_block(block_num).unwrap_or_default();
-                let _ = action_tx.send(Action::NewBlockReceived {
-                    block,
-                    transactions: txs,
-                    notes,
-                });
-                // Only advance current_block for contiguous coverage
-                if block_num == current_block {
-                    current_block = block_num + 1;
+
+                offset += batch_len;
+                if batch_len < BATCH_SIZE {
+                    break;
                 }
             }
         }
