@@ -42,6 +42,10 @@ struct Cli {
     #[arg(long, default_value = "tip")]
     from: StartFrom,
 
+    /// Block number to stop syncing at (default: keep tailing)
+    #[arg(long)]
+    to: Option<u32>,
+
     /// Path to SQLite database file (default: ~/.miden-watch/data.db)
     #[arg(long, default_value = None)]
     db_path: Option<PathBuf>,
@@ -95,10 +99,12 @@ async fn main() -> Result<()> {
     let sync_store = store.clone();
     let sync_action_tx = action_tx.clone();
     let sync_start_from = cli.from;
+    let sync_stop_block = cli.to;
     tokio::spawn(async move {
         if let Err(e) = sync::run_sync(
             endpoint,
             sync_start_from,
+            sync_stop_block,
             sync_store,
             sync_action_tx.clone(),
         )

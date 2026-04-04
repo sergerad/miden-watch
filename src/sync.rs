@@ -14,6 +14,7 @@ use crate::types::StartFrom;
 pub async fn run_sync(
     endpoint: Endpoint,
     start_from: StartFrom,
+    stop_block: Option<u32>,
     store: Arc<Mutex<Store>>,
     action_tx: mpsc::UnboundedSender<Action>,
 ) -> Result<()> {
@@ -73,8 +74,14 @@ pub async fn run_sync(
             }
         };
 
-        // Fetch all blocks from current_block to chain_tip
-        while current_block <= chain_tip {
+        // Determine the upper bound for this sync pass
+        let sync_until = match stop_block {
+            Some(stop) => chain_tip.min(stop),
+            None => chain_tip,
+        };
+
+        // Fetch all blocks from current_block to sync_until
+        while current_block <= sync_until {
             match rpc.fetch_block_data(current_block).await {
                 Ok(sync_result) => {
                     let store = store.lock().await;
@@ -98,6 +105,13 @@ pub async fn run_sync(
                 }
             }
             current_block += 1;
+        }
+
+        // If we've reached the stop block, we're done syncing
+        if let Some(stop) = stop_block {
+            if current_block > stop {
+                return Ok(());
+            }
         }
     }
 }
