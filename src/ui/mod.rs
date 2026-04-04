@@ -48,6 +48,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     status_bar::render(frame, app, chunks[1]);
 
+    if app.search_input.is_some() {
+        render_search_input(frame, app, chunks[0]);
+    }
+
     if app.show_help {
         render_help_popup(frame);
     }
@@ -103,6 +107,10 @@ fn render_help_popup(frame: &mut Frame) {
             Span::styled("Toggle tailing mode", desc_style),
         ]),
         Line::from(vec![
+            Span::styled("  /           ", key_style),
+            Span::styled("Search by block number", desc_style),
+        ]),
+        Line::from(vec![
             Span::styled("  Ctrl+o      ", key_style),
             Span::styled("Jump back in history", desc_style),
         ]),
@@ -143,4 +151,29 @@ fn render_help_popup(frame: &mut Frame) {
     );
 
     frame.render_widget(popup, popup_area);
+}
+
+fn render_search_input(frame: &mut Frame, app: &App, area: Rect) {
+    let input = app.search_input.as_deref().unwrap_or("");
+    let text = format!("/ {input}█");
+
+    let width = (text.len() as u16 + 4).min(area.width);
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = area.y + area.height.saturating_sub(3);
+    let input_area = Rect::new(x, y, width, 3);
+
+    frame.render_widget(Clear, input_area);
+
+    let paragraph = Paragraph::new(Line::from(Span::styled(
+        text,
+        Style::default().fg(Color::White),
+    )))
+    .block(
+        Block::default()
+            .title(" Go to block ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+
+    frame.render_widget(paragraph, input_area);
 }

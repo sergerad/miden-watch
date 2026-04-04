@@ -63,6 +63,8 @@ pub struct App {
     nav_forward: Vec<NavEntry>,
     /// Sync progress for status bar display
     pub sync_progress: Option<(u32, u32)>,
+    /// Search input state: when Some, the user is typing a block number
+    pub search_input: Option<String>,
 }
 
 impl App {
@@ -91,6 +93,7 @@ impl App {
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
             sync_progress: None,
+            search_input: None,
         }
     }
 
@@ -123,6 +126,33 @@ impl App {
                 KeyCode::Char('c') => Some(Action::ClearErrorLog),
                 _ => None,
             };
+        }
+
+        // When search input is active, handle typing
+        if let Some(ref mut input) = self.search_input {
+            match key.code {
+                KeyCode::Esc => {
+                    self.search_input = None;
+                    return None;
+                }
+                KeyCode::Enter => {
+                    let result = input.parse::<u32>().ok();
+                    self.search_input = None;
+                    return result.map(Action::SearchBlock);
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    if input.is_empty() {
+                        self.search_input = None;
+                    }
+                    return None;
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    input.push(c);
+                    return None;
+                }
+                _ => return None,
+            }
         }
 
         // ? opens help
@@ -198,6 +228,10 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
                 KeyCode::Char('t') => Some(Action::ToggleTailing),
+                KeyCode::Char('/') => {
+                    self.search_input = Some(String::new());
+                    None
+                }
                 _ => None,
             },
             Pane::BlockDetail => match key.code {
@@ -450,6 +484,14 @@ impl App {
                     self.detail_scroll = u16::MAX / 2;
                 }
             },
+            Action::SearchBlock(block_num) => {
+                self.push_nav();
+                self.mode = Mode::Browsing;
+                // Find the closest block: exact match or nearest lower
+                if let Some(idx) = self.blocks.iter().position(|b| b.block_num <= block_num) {
+                    self.block_list_state.select(Some(idx));
+                }
+            }
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;
             }
