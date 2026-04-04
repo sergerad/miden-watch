@@ -1,5 +1,6 @@
 mod block_detail;
 mod block_list;
+mod error_log;
 mod note_detail;
 mod status_bar;
 mod tx_detail;
@@ -21,23 +22,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.area());
 
-    match app.active_pane {
-        Pane::BlockList => {
-            block_list::render(frame, app, chunks[0]);
-        }
-        Pane::BlockDetail => {
-            let main_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .split(chunks[0]);
-            block_detail::render_block_info(frame, app, main_chunks[0]);
-            block_detail::render_tx_and_notes(frame, app, main_chunks[1]);
-        }
-        Pane::TxDetail => {
-            tx_detail::render(frame, app, chunks[0]);
-        }
-        Pane::NoteDetail => {
-            note_detail::render(frame, app, chunks[0]);
+    if app.show_error_log {
+        error_log::render(frame, app, chunks[0]);
+    } else {
+        match app.active_pane {
+            Pane::BlockList => {
+                block_list::render(frame, app, chunks[0]);
+            }
+            Pane::BlockDetail => {
+                let main_chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                    .split(chunks[0]);
+                block_detail::render_block_info(frame, app, main_chunks[0]);
+                block_detail::render_tx_and_notes(frame, app, main_chunks[1]);
+            }
+            Pane::TxDetail => {
+                tx_detail::render(frame, app, chunks[0]);
+            }
+            Pane::NoteDetail => {
+                note_detail::render(frame, app, chunks[0]);
+            }
         }
     }
 
@@ -107,6 +112,10 @@ fn render_help_popup(frame: &mut Frame) {
         ]),
         Line::from(""),
         Line::from(Span::styled("General", header_style)),
+        Line::from(vec![
+            Span::styled("  !           ", key_style),
+            Span::styled("Toggle error log", desc_style),
+        ]),
         Line::from(vec![
             Span::styled("  ?           ", key_style),
             Span::styled("Toggle this help", desc_style),

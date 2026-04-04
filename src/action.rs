@@ -22,6 +22,13 @@ pub enum Action {
     GoToTop,
     GoToBottom,
     ToggleHelp,
+    ToggleErrorLog,
+    ClearErrorLog,
     NavBack,
     NavForward,
+    SyncProgress {
+        current: u32,
+        target: u32,
+    },
+    SyncDone,
 }

@@ -21,7 +21,6 @@ pub async fn run_sync(
     let rpc = RpcClient::new(&endpoint);
 
     // Determine starting block
-    let explicit_start = !matches!(start_from, StartFrom::Tip);
     let mut current_block = match start_from {
         StartFrom::Genesis => 0,
         StartFrom::Block(n) => n,
@@ -53,8 +52,8 @@ pub async fn run_sync(
                     });
                 }
             }
-            // If start wasn't explicitly set, continue from where we left off
-            if !explicit_start && latest >= current_block {
+            // Continue from where we left off if the store is ahead
+            if latest >= current_block {
                 current_block = latest + 1;
             }
         }
@@ -81,7 +80,19 @@ pub async fn run_sync(
         };
 
         // Fetch all blocks from current_block to sync_until
+        if current_block <= sync_until {
+            let _ = action_tx.send(Action::SyncProgress {
+                current: current_block,
+                target: sync_until,
+            });
+        }
+
         while current_block <= sync_until {
+            let _ = action_tx.send(Action::SyncProgress {
+                current: current_block,
+                target: sync_until,
+            });
+
             match rpc.fetch_block_data(current_block).await {
                 Ok(sync_result) => {
                     let store = store.lock().await;
@@ -106,6 +117,9 @@ pub async fn run_sync(
             }
             current_block += 1;
         }
+
+        // Clear progress when caught up
+        let _ = action_tx.send(Action::SyncDone);
 
         // If we've reached the stop block, we're done syncing
         if let Some(stop) = stop_block {

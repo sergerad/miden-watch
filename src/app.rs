@@ -46,8 +46,9 @@ pub struct App {
     pub selected_block_notes: Vec<NoteInfo>,
     pub tx_list_state: ListState,
     pub note_list_state: ListState,
-    pub error: Option<String>,
-    pub error_time: Option<std::time::Instant>,
+    pub error_log: Vec<String>,
+    pub error_list_state: ListState,
+    pub show_error_log: bool,
     pub should_quit: bool,
     #[allow(dead_code)]
     pub action_tx: mpsc::UnboundedSender<Action>,
@@ -60,6 +61,8 @@ pub struct App {
     /// Navigation history for Ctrl+o / Ctrl+i
     nav_back: Vec<NavEntry>,
     nav_forward: Vec<NavEntry>,
+    /// Sync progress for status bar display
+    pub sync_progress: Option<(u32, u32)>,
 }
 
 impl App {
@@ -76,8 +79,9 @@ impl App {
             selected_block_notes: Vec::new(),
             tx_list_state: ListState::default(),
             note_list_state: ListState::default(),
-            error: None,
-            error_time: None,
+            error_log: Vec::new(),
+            error_list_state: ListState::default(),
+            show_error_log: false,
             should_quit: false,
             action_tx,
             detail_scroll: 0,
@@ -86,6 +90,7 @@ impl App {
             show_help: false,
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
+            sync_progress: None,
         }
     }
 
@@ -108,9 +113,26 @@ impl App {
             return Some(Action::ToggleHelp);
         }
 
+        // When error log is open, handle its navigation or close it
+        if self.show_error_log {
+            return match key.code {
+                KeyCode::Char('!') | KeyCode::Esc => Some(Action::ToggleErrorLog),
+                KeyCode::Char('q') => Some(Action::Quit),
+                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(1)),
+                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(1)),
+                KeyCode::Char('c') => Some(Action::ClearErrorLog),
+                _ => None,
+            };
+        }
+
         // ? opens help
         if key.code == KeyCode::Char('?') {
             return Some(Action::ToggleHelp);
+        }
+
+        // ! opens error log
+        if key.code == KeyCode::Char('!') {
+            return Some(Action::ToggleErrorLog);
         }
 
         // Ctrl key combinations
@@ -214,38 +236,53 @@ impl App {
 
     pub fn update(&mut self, action: Action) {
         match action {
-            Action::Tick => {
-                // Clear errors after 10 seconds
-                if let Some(time) = self.error_time {
-                    if time.elapsed().as_secs() > 10 {
-                        self.error = None;
-                        self.error_time = None;
-                    }
+            Action::Tick => {}
+            Action::ToggleErrorLog => {
+                self.show_error_log = !self.show_error_log;
+                if self.show_error_log && !self.error_log.is_empty() {
+                    self.error_list_state.select(Some(self.error_log.len() - 1));
                 }
+            }
+            Action::ClearErrorLog => {
+                self.error_log.clear();
+                self.error_list_state.select(None);
+                self.show_error_log = false;
             }
             Action::Quit => {
                 self.should_quit = true;
             }
-            Action::Up(n) => match self.active_pane {
-                Pane::BlockList => {
-                    if n > 1 {
-                        self.push_nav();
+            Action::Up(n) => {
+                if self.show_error_log {
+                    self.select_prev_error(n);
+                } else {
+                    match self.active_pane {
+                        Pane::BlockList => {
+                            if n > 1 {
+                                self.push_nav();
+                            }
+                            self.select_prev_block(n);
+                        }
+                        Pane::BlockDetail => self.select_prev_tx(n),
+                        _ => {}
                     }
-                    self.select_prev_block(n);
                 }
-                Pane::BlockDetail => self.select_prev_tx(n),
-                _ => {}
-            },
-            Action::Down(n) => match self.active_pane {
-                Pane::BlockList => {
-                    if n > 1 {
-                        self.push_nav();
+            }
+            Action::Down(n) => {
+                if self.show_error_log {
+                    self.select_next_error(n);
+                } else {
+                    match self.active_pane {
+                        Pane::BlockList => {
+                            if n > 1 {
+                                self.push_nav();
+                            }
+                            self.select_next_block(n);
+                        }
+                        Pane::BlockDetail => self.select_next_tx(n),
+                        _ => {}
                     }
-                    self.select_next_block(n);
                 }
-                Pane::BlockDetail => self.select_next_tx(n),
-                _ => {}
-            },
+            }
             Action::Enter => match self.active_pane {
                 Pane::BlockList => {
                     if let Some(idx) = self.block_list_state.selected() {
@@ -332,8 +369,7 @@ impl App {
                 }
             }
             Action::SyncError(msg) => {
-                self.error = Some(msg);
-                self.error_time = Some(std::time::Instant::now());
+                self.error_log.push(msg);
             }
             Action::ScrollUp => {
                 self.detail_scroll = self.detail_scroll.saturating_sub(1);
@@ -416,6 +452,12 @@ impl App {
             },
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;
+            }
+            Action::SyncProgress { current, target } => {
+                self.sync_progress = Some((current, target));
+            }
+            Action::SyncDone => {
+                // Keep showing the last progress values
             }
         }
     }
@@ -583,6 +625,28 @@ impl App {
             None => 0,
         };
         self.tx_list_state.select(Some(i));
+    }
+
+    fn select_next_error(&mut self, n: usize) {
+        if self.error_log.is_empty() {
+            return;
+        }
+        let i = match self.error_list_state.selected() {
+            Some(i) => (i + n).min(self.error_log.len() - 1),
+            None => 0,
+        };
+        self.error_list_state.select(Some(i));
+    }
+
+    fn select_prev_error(&mut self, n: usize) {
+        if self.error_log.is_empty() {
+            return;
+        }
+        let i = match self.error_list_state.selected() {
+            Some(i) => i.saturating_sub(n),
+            None => 0,
+        };
+        self.error_list_state.select(Some(i));
     }
 
     /// Returns the block currently being browsed (pinned), or the list-selected block
