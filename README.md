@@ -42,6 +42,7 @@ cargo run -- --url https://rpc.testnet.miden.io
 | Key | Action |
 |-----|--------|
 | `j` / `k` | Move down / up |
+| `{n}j` / `{n}k` | Jump n lines (e.g. `200j`) |
 | `Ctrl+d` / `Ctrl+u` | Half-page down / up |
 | `gg` | Go to top |
 | `G` | Go to bottom |
@@ -49,25 +50,41 @@ cargo run -- --url https://rpc.testnet.miden.io
 | `Esc` / `h` | Go back |
 | `Ctrl+o` / `Ctrl+i` | Jump back / forward in history |
 | `/` | Search by block number |
-| `{n}j` / `{n}k` | Jump n lines (e.g. `200j`) |
+| `f` | Cycle block filter (All / Has txs / Has notes) |
 
 ### General
 
 | Key | Action |
 |-----|--------|
-| `?` | Toggle help |
+| `?` | Toggle help overlay |
 | `!` | Toggle error log |
 | `c` | Clear error log (when viewing) |
 | `q` | Quit |
 | `Ctrl+c` | Force quit |
 
+## Features
+
+### Block list
+Scrollable list of blocks showing block number, timestamp, relative age, time delta between consecutive blocks, and transaction/note counts. New blocks appear at the top automatically when viewing the head, with a brief green flash highlight.
+
+### Block filtering
+Press `f` to cycle through filters: all blocks, only blocks with transactions, or only blocks with notes. The active filter is shown in the title bar.
+
+### Block detail
+Split view with block header fields on the left and the transaction list on the right. Press Enter on a transaction to see its details.
+
+### Transaction detail
+Shows transaction ID, account ID, and input/output note counts.
+
+### Note detail
+Shows note ID, sender, type, tag, and index.
+
+### Error log
+Errors from the sync process are collected and indicated by a warning symbol in the status bar. Press `!` to view the full error log, navigate with `j`/`k`, and press `c` to clear.
+
+### Sync progress
+The status bar shows sync progress while catching up (e.g. `Syncing 500/1000`) and a green checkmark when synced.
+
 ## Data Persistence
 
-Blocks, transactions, and notes are stored in a local SQLite database (`~/.miden-watch/data.db` by default). On restart, previously synced data is loaded from the database and syncing resumes from where it left off.
-
-## Views
-
-- **Block list** -- scrollable list of blocks showing block number, timestamp, and transaction/note counts. New blocks appear at the top automatically when you're viewing the head.
-- **Block detail** -- split view with block header fields on the left and the transaction list on the right.
-- **Transaction detail** -- shows transaction ID, account ID, and input/output note counts.
-- **Note detail** -- shows note ID, sender, type, tag, and index.
+Blocks, transactions, and notes are stored in a local SQLite database (`~/.miden-watch/data.db` by default). On restart, previously synced data is loaded from the database and syncing resumes from where it left off, avoiding redundant fetches.
