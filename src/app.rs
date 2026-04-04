@@ -54,6 +54,8 @@ pub struct App {
     pub detail_scroll: u16,
     /// Tracks a pending 'g' keypress for the gg sequence
     pending_g: bool,
+    /// Numeric prefix for vim-style count (e.g. 200j)
+    count_buf: String,
     pub show_help: bool,
     /// Navigation history for Ctrl+o / Ctrl+i
     nav_back: Vec<NavEntry>,
@@ -80,6 +82,7 @@ impl App {
             action_tx,
             detail_scroll: 0,
             pending_g: false,
+            count_buf: String::new(),
             show_help: false,
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
@@ -156,11 +159,21 @@ impl App {
         // Any other key cancels a pending g
         self.pending_g = false;
 
+        // Accumulate digits for vim-style count prefix (e.g. 200j)
+        if let KeyCode::Char(c) = key.code {
+            if c.is_ascii_digit() && !key.modifiers.contains(KeyModifiers::CONTROL) {
+                self.count_buf.push(c);
+                return None;
+            }
+        }
+
+        let count = self.take_count();
+
         match self.active_pane {
             Pane::BlockList => match key.code {
                 KeyCode::Char('q') => Some(Action::Quit),
-                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down),
-                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up),
+                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
+                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
                 KeyCode::Char('t') => Some(Action::ToggleTailing),
                 _ => None,
@@ -170,8 +183,8 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
                     Some(Action::Back)
                 }
-                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down),
-                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up),
+                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
+                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
                 KeyCode::Char('t') => Some(Action::ToggleTailing),
                 _ => None,
@@ -213,14 +226,24 @@ impl App {
             Action::Quit => {
                 self.should_quit = true;
             }
-            Action::Up => match self.active_pane {
-                Pane::BlockList => self.select_prev_block(),
-                Pane::BlockDetail => self.select_prev_tx(),
+            Action::Up(n) => match self.active_pane {
+                Pane::BlockList => {
+                    if n > 1 {
+                        self.push_nav();
+                    }
+                    self.select_prev_block(n);
+                }
+                Pane::BlockDetail => self.select_prev_tx(n),
                 _ => {}
             },
-            Action::Down => match self.active_pane {
-                Pane::BlockList => self.select_next_block(),
-                Pane::BlockDetail => self.select_next_tx(),
+            Action::Down(n) => match self.active_pane {
+                Pane::BlockList => {
+                    if n > 1 {
+                        self.push_nav();
+                    }
+                    self.select_next_block(n);
+                }
+                Pane::BlockDetail => self.select_next_tx(n),
                 _ => {}
             },
             Action::Enter => match self.active_pane {
@@ -397,6 +420,15 @@ impl App {
         }
     }
 
+    fn take_count(&mut self) -> usize {
+        if self.count_buf.is_empty() {
+            return 1;
+        }
+        let count = self.count_buf.parse::<usize>().unwrap_or(1).max(1);
+        self.count_buf.clear();
+        count
+    }
+
     fn nav_snapshot(&self) -> NavEntry {
         NavEntry {
             pane: self.active_pane,
@@ -507,59 +539,47 @@ impl App {
         }
     }
 
-    fn select_next_block(&mut self) {
+    fn select_next_block(&mut self, n: usize) {
         if self.blocks.is_empty() {
             return;
         }
         self.mode = Mode::Browsing;
         let i = match self.block_list_state.selected() {
-            Some(i) => {
-                if i >= self.blocks.len() - 1 {
-                    self.blocks.len() - 1
-                } else {
-                    i + 1
-                }
-            }
+            Some(i) => (i + n).min(self.blocks.len() - 1),
             None => 0,
         };
         self.block_list_state.select(Some(i));
     }
 
-    fn select_prev_block(&mut self) {
+    fn select_prev_block(&mut self, n: usize) {
         if self.blocks.is_empty() {
             return;
         }
         self.mode = Mode::Browsing;
         let i = match self.block_list_state.selected() {
-            Some(i) => i.saturating_sub(1),
+            Some(i) => i.saturating_sub(n),
             None => 0,
         };
         self.block_list_state.select(Some(i));
     }
 
-    fn select_next_tx(&mut self) {
+    fn select_next_tx(&mut self, n: usize) {
         if self.selected_block_txs.is_empty() {
             return;
         }
         let i = match self.tx_list_state.selected() {
-            Some(i) => {
-                if i >= self.selected_block_txs.len() - 1 {
-                    self.selected_block_txs.len() - 1
-                } else {
-                    i + 1
-                }
-            }
+            Some(i) => (i + n).min(self.selected_block_txs.len() - 1),
             None => 0,
         };
         self.tx_list_state.select(Some(i));
     }
 
-    fn select_prev_tx(&mut self) {
+    fn select_prev_tx(&mut self, n: usize) {
         if self.selected_block_txs.is_empty() {
             return;
         }
         let i = match self.tx_list_state.selected() {
-            Some(i) => i.saturating_sub(1),
+            Some(i) => i.saturating_sub(n),
             None => 0,
         };
         self.tx_list_state.select(Some(i));

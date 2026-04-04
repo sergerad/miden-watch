@@ -4,8 +4,8 @@ use crate::types::{BlockInfo, NoteInfo, TransactionInfo};
 pub enum Action {
     Tick,
     Quit,
-    Up,
-    Down,
+    Up(usize),
+    Down(usize),
     Enter,
     Back,
     ToggleTailing,
