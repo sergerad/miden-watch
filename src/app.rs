@@ -11,6 +11,33 @@ use crate::event::Event;
 use crate::types::{BlockInfo, NoteInfo, TransactionInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockFilter {
+    All,
+    WithTransactions,
+    WithNotes,
+}
+
+impl BlockFilter {
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::WithTransactions,
+            Self::WithTransactions => Self::WithNotes,
+            Self::WithNotes => Self::All,
+        }
+    }
+}
+
+impl std::fmt::Display for BlockFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All => write!(f, "All"),
+            Self::WithTransactions => write!(f, "Has txs"),
+            Self::WithNotes => write!(f, "Has notes"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
     BlockList,
     BlockDetail,
@@ -58,6 +85,8 @@ pub struct App {
     pub sync_progress: Option<(u32, u32)>,
     /// Search input state: when Some, the user is typing a block number
     pub search_input: Option<String>,
+    /// Active block list filter
+    pub filter: BlockFilter,
 }
 
 impl App {
@@ -86,6 +115,7 @@ impl App {
             nav_forward: Vec::new(),
             sync_progress: None,
             search_input: None,
+            filter: BlockFilter::All,
         }
     }
 
@@ -223,6 +253,7 @@ impl App {
                     self.search_input = Some(String::new());
                     None
                 }
+                KeyCode::Char('f') => Some(Action::CycleFilter),
                 _ => None,
             },
             Pane::BlockDetail => match key.code {
@@ -307,10 +338,11 @@ impl App {
             }
             Action::Enter => match self.active_pane {
                 Pane::BlockList => {
-                    if let Some(idx) = self.block_list_state.selected() {
-                        if idx < self.blocks.len() {
+                    let filtered = self.filtered_indices();
+                    if let Some(fi) = self.block_list_state.selected() {
+                        if let Some(&real_idx) = filtered.get(fi) {
                             self.push_nav();
-                            let block_num = self.blocks[idx].block_num;
+                            let block_num = self.blocks[real_idx].block_num;
                             self.browse_block(block_num);
                             self.active_pane = Pane::BlockDetail;
                         }
@@ -368,17 +400,21 @@ impl App {
                 transactions,
                 notes,
             } => {
-                // Always insert the block into the list
                 let at_head = self.block_list_state.selected() == Some(0);
-                let selected_block_num = self.selected_block_num();
+                let selected_bn = self.selected_block_num_filtered();
                 self.insert_block(block, transactions, notes);
 
-                if at_head || self.blocks.len() == 1 {
-                    // Auto-scroll to newest block when already at head
+                let filtered = self.filtered_indices();
+                if at_head || filtered.len() <= 1 {
                     self.block_list_state.select(Some(0));
-                } else if let Some(bn) = selected_block_num {
-                    // Preserve the current selection by block number
-                    self.select_block_by_num(bn);
+                } else if let Some(bn) = selected_bn {
+                    // Find the block in the new filtered view
+                    if let Some(fi) = filtered
+                        .iter()
+                        .position(|&ri| self.blocks[ri].block_num == bn)
+                    {
+                        self.block_list_state.select(Some(fi));
+                    }
                 }
             }
             Action::SyncError(msg) => {
@@ -392,11 +428,13 @@ impl App {
             }
             Action::HalfPageUp => match self.active_pane {
                 Pane::BlockList => {
-                    self.push_nav();
-
-                    let current = self.block_list_state.selected().unwrap_or(0);
-                    let target = current.saturating_sub(HALF_PAGE);
-                    self.block_list_state.select(Some(target));
+                    let flen = self.filtered_indices().len();
+                    if flen > 0 {
+                        self.push_nav();
+                        let current = self.block_list_state.selected().unwrap_or(0);
+                        let target = current.saturating_sub(HALF_PAGE);
+                        self.block_list_state.select(Some(target));
+                    }
                 }
                 Pane::BlockDetail => {
                     let current = self.tx_list_state.selected().unwrap_or(0);
@@ -409,11 +447,11 @@ impl App {
             },
             Action::HalfPageDown => match self.active_pane {
                 Pane::BlockList => {
-                    if !self.blocks.is_empty() {
+                    let flen = self.filtered_indices().len();
+                    if flen > 0 {
                         self.push_nav();
-
                         let current = self.block_list_state.selected().unwrap_or(0);
-                        let target = (current + HALF_PAGE).min(self.blocks.len() - 1);
+                        let target = (current + HALF_PAGE).min(flen - 1);
                         self.block_list_state.select(Some(target));
                     }
                 }
@@ -430,9 +468,8 @@ impl App {
             },
             Action::GoToTop => match self.active_pane {
                 Pane::BlockList => {
-                    if !self.blocks.is_empty() {
+                    if !self.filtered_indices().is_empty() {
                         self.push_nav();
-
                         self.block_list_state.select(Some(0));
                     }
                 }
@@ -447,10 +484,10 @@ impl App {
             },
             Action::GoToBottom => match self.active_pane {
                 Pane::BlockList => {
-                    if !self.blocks.is_empty() {
+                    let flen = self.filtered_indices().len();
+                    if flen > 0 {
                         self.push_nav();
-
-                        self.block_list_state.select(Some(self.blocks.len() - 1));
+                        self.block_list_state.select(Some(flen - 1));
                     }
                 }
                 Pane::BlockDetail => {
@@ -465,9 +502,22 @@ impl App {
             },
             Action::SearchBlock(block_num) => {
                 self.push_nav();
-                // Find the closest block: exact match or nearest lower
-                if let Some(idx) = self.blocks.iter().position(|b| b.block_num <= block_num) {
-                    self.block_list_state.select(Some(idx));
+                let filtered = self.filtered_indices();
+                // Find the closest block in filtered view: exact match or nearest lower
+                if let Some(fi) = filtered
+                    .iter()
+                    .position(|&ri| self.blocks[ri].block_num <= block_num)
+                {
+                    self.block_list_state.select(Some(fi));
+                }
+            }
+            Action::CycleFilter => {
+                self.filter = self.filter.next();
+                let filtered = self.filtered_indices();
+                if filtered.is_empty() {
+                    self.block_list_state.select(None);
+                } else {
+                    self.block_list_state.select(Some(0));
                 }
             }
             Action::ToggleHelp => {
@@ -573,34 +623,21 @@ impl App {
         self.block_notes.insert(block_num, notes);
     }
 
-    /// Get the block number currently selected in the block list
-    fn selected_block_num(&self) -> Option<u32> {
-        self.block_list_state
-            .selected()
-            .and_then(|i| self.blocks.get(i))
-            .map(|b| b.block_num)
-    }
-
-    /// Update block_list_state to point at the given block number
-    fn select_block_by_num(&mut self, block_num: u32) {
-        if let Some(idx) = self.blocks.iter().position(|b| b.block_num == block_num) {
-            self.block_list_state.select(Some(idx));
-        }
-    }
-
     fn select_next_block(&mut self, n: usize) {
-        if self.blocks.is_empty() {
+        let flen = self.filtered_indices().len();
+        if flen == 0 {
             return;
         }
         let i = match self.block_list_state.selected() {
-            Some(i) => (i + n).min(self.blocks.len() - 1),
+            Some(i) => (i + n).min(flen - 1),
             None => 0,
         };
         self.block_list_state.select(Some(i));
     }
 
     fn select_prev_block(&mut self, n: usize) {
-        if self.blocks.is_empty() {
+        let flen = self.filtered_indices().len();
+        if flen == 0 {
             return;
         }
         let i = match self.block_list_state.selected() {
@@ -652,6 +689,30 @@ impl App {
             None => 0,
         };
         self.error_list_state.select(Some(i));
+    }
+
+    /// Get the block number currently selected in the filtered block list
+    fn selected_block_num_filtered(&self) -> Option<u32> {
+        let filtered = self.filtered_indices();
+        self.block_list_state
+            .selected()
+            .and_then(|fi| filtered.get(fi).copied())
+            .and_then(|ri| self.blocks.get(ri))
+            .map(|b| b.block_num)
+    }
+
+    /// Returns indices into `self.blocks` that match the current filter
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| match self.filter {
+                BlockFilter::All => true,
+                BlockFilter::WithTransactions => b.tx_count > 0,
+                BlockFilter::WithNotes => b.note_count > 0,
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Returns the block currently being browsed (pinned), or the list-selected block

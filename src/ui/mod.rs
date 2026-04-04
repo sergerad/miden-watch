@@ -107,6 +107,10 @@ fn render_help_popup(frame: &mut Frame) {
             Span::styled("Search by block number", desc_style),
         ]),
         Line::from(vec![
+            Span::styled("  f           ", key_style),
+            Span::styled("Cycle block filter", desc_style),
+        ]),
+        Line::from(vec![
             Span::styled("  Ctrl+o      ", key_style),
             Span::styled("Jump back in history", desc_style),
         ]),

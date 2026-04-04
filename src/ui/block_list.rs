@@ -5,12 +5,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-use crate::app::App;
+use crate::app::{App, BlockFilter};
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .blocks
+    let filtered = app.filtered_indices();
+    let items: Vec<ListItem> = filtered
         .iter()
+        .map(|&ri| &app.blocks[ri])
         .map(|b| {
             let ts = DateTime::from_timestamp(b.timestamp as i64, 0)
                 .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
@@ -38,12 +39,14 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
+    let title = if app.filter == BlockFilter::All {
+        " miden-watch - Blocks ".to_string()
+    } else {
+        format!(" miden-watch - Blocks (filtered: {}) ", app.filter)
+    };
+
     let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" miden-watch - Blocks ")
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_style(
             Style::default()
                 .add_modifier(Modifier::REVERSED)

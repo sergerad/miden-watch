@@ -24,6 +24,7 @@ pub enum Action {
     ToggleErrorLog,
     ClearErrorLog,
     SearchBlock(u32),
+    CycleFilter,
     NavBack,
     NavForward,
     SyncProgress {
