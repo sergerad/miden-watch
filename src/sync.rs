@@ -59,7 +59,7 @@ pub async fn run_sync(
         }
     }
 
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let mut interval = tokio::time::interval(Duration::from_secs(2));
 
     loop {
         interval.tick().await;
