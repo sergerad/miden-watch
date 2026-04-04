@@ -1,5 +1,30 @@
 use miden_client::block::BlockHeader;
 
+/// Where to start syncing from.
+#[derive(Debug, Clone)]
+pub enum StartFrom {
+    /// Start from the current chain tip
+    Tip,
+    /// Start from the genesis block (block 0)
+    Genesis,
+    /// Start from a specific block number
+    Block(u32),
+}
+
+impl std::str::FromStr for StartFrom {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "tip" | "latest" => Ok(StartFrom::Tip),
+            "genesis" => Ok(StartFrom::Genesis),
+            other => other.parse::<u32>().map(StartFrom::Block).map_err(|_| {
+                format!("expected 'tip', 'genesis', or a block number, got '{other}'")
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BlockInfo {
     pub block_num: u32,

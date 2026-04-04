@@ -25,6 +25,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::app::App;
 use crate::event::EventHandler;
+use crate::types::StartFrom;
 
 #[derive(Parser)]
 #[command(name = "miden-watch", about = "Miden chain explorer TUI")]
@@ -37,9 +38,9 @@ struct Cli {
     )]
     url: String,
 
-    /// Block number to start syncing from (default: latest)
-    #[arg(long)]
-    start_block: Option<u32>,
+    /// Where to start syncing from: 'tip' (default), 'genesis', or a block number
+    #[arg(long, default_value = "tip")]
+    from: StartFrom,
 
     /// Path to SQLite database file (default: ~/.miden-watch/data.db)
     #[arg(long, default_value = None)]
@@ -93,11 +94,11 @@ async fn main() -> Result<()> {
     // Spawn sync task
     let sync_store = store.clone();
     let sync_action_tx = action_tx.clone();
-    let sync_start_block = cli.start_block;
+    let sync_start_from = cli.from;
     tokio::spawn(async move {
         if let Err(e) = sync::run_sync(
             endpoint,
-            sync_start_block,
+            sync_start_from,
             sync_store,
             sync_action_tx.clone(),
         )

@@ -9,19 +9,22 @@ use tokio::sync::mpsc;
 use crate::action::Action;
 use crate::rpc::RpcClient;
 use crate::store::Store;
+use crate::types::StartFrom;
 
 pub async fn run_sync(
     endpoint: Endpoint,
-    start_block: Option<u32>,
+    start_from: StartFrom,
     store: Arc<Mutex<Store>>,
     action_tx: mpsc::UnboundedSender<Action>,
 ) -> Result<()> {
     let rpc = RpcClient::new(&endpoint);
 
     // Determine starting block
-    let mut current_block = match start_block {
-        Some(n) => n,
-        None => match rpc.get_chain_tip().await {
+    let explicit_start = !matches!(start_from, StartFrom::Tip);
+    let mut current_block = match start_from {
+        StartFrom::Genesis => 0,
+        StartFrom::Block(n) => n,
+        StartFrom::Tip => match rpc.get_chain_tip().await {
             Ok(tip) => tip,
             Err(e) => {
                 let _ = action_tx.send(Action::SyncError(format!("Failed to get chain tip: {e}")));
@@ -49,8 +52,8 @@ pub async fn run_sync(
                     });
                 }
             }
-            // If start_block wasn't explicitly set, continue from where we left off
-            if start_block.is_none() && latest >= current_block {
+            // If start wasn't explicitly set, continue from where we left off
+            if !explicit_start && latest >= current_block {
                 current_block = latest + 1;
             }
         }
