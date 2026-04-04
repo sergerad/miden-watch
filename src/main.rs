@@ -85,8 +85,11 @@ async fn main() -> Result<()> {
     // Set up action channel
     let (action_tx, mut action_rx) = mpsc::unbounded_channel();
 
+    // Detect network from URL
+    let network = detect_network(&cli.url);
+
     // Set up app
-    let mut app = App::new(action_tx.clone());
+    let mut app = App::new(action_tx.clone(), network);
 
     // Set up terminal
     enable_raw_mode()?;
@@ -159,4 +162,19 @@ fn dirs_default() -> PathBuf {
 
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn detect_network(url: &str) -> String {
+    let lower = url.to_lowercase();
+    if lower.contains("testnet") {
+        "testnet".to_string()
+    } else if lower.contains("devnet") {
+        "devnet".to_string()
+    } else if lower.contains("mainnet") {
+        "mainnet".to_string()
+    } else if lower.contains("localhost") || lower.contains("127.0.0.1") {
+        "local".to_string()
+    } else {
+        "unknown".to_string()
+    }
 }

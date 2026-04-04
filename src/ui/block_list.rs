@@ -116,9 +116,12 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     let title = if app.filter == BlockFilter::All {
-        " miden-watch - Blocks ".to_string()
+        format!(" miden-watch [{}] - Blocks ", app.network)
     } else {
-        format!(" miden-watch - Blocks (filtered: {}) ", app.filter)
+        format!(
+            " miden-watch [{}] - Blocks (filtered: {}) ",
+            app.network, app.filter
+        )
     };
 
     let list = List::new(items)

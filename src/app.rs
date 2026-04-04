@@ -92,10 +92,12 @@ pub struct App {
     pub last_received_block: Option<(u32, Instant)>,
     /// Whether sync has caught up to the target
     pub sync_done: bool,
+    /// Network name derived from the RPC URL
+    pub network: String,
 }
 
 impl App {
-    pub fn new(action_tx: mpsc::UnboundedSender<Action>) -> Self {
+    pub fn new(action_tx: mpsc::UnboundedSender<Action>, network: String) -> Self {
         Self {
             active_pane: Pane::BlockList,
             blocks: Vec::new(),
@@ -123,6 +125,7 @@ impl App {
             filter: BlockFilter::All,
             last_received_block: None,
             sync_done: false,
+            network,
         }
     }
 
