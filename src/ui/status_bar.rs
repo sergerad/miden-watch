@@ -22,10 +22,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     if let Some((current, target)) = app.sync_progress {
         top_spans.push(Span::raw("| "));
-        top_spans.push(Span::styled(
-            format!("Syncing {}/{}", current, target),
-            Style::default().fg(Color::Yellow),
-        ));
+        if app.sync_done {
+            top_spans.push(Span::styled(
+                format!("✔ Synced {}/{}", current, target),
+                Style::default().fg(Color::Green),
+            ));
+        } else {
+            top_spans.push(Span::styled(
+                format!("Syncing {}/{}", current, target),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
     }
 
     if !app.error_log.is_empty() {

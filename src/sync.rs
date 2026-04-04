@@ -37,6 +37,7 @@ pub async fn run_sync(
     {
         let store = store.lock().await;
         if let Ok(blocks) = store.get_blocks_from(current_block, stop_block) {
+            // blocks are ordered newest-first, reverse to process oldest-first
             for block in blocks.into_iter().rev() {
                 let block_num = block.block_num;
                 let txs = store
@@ -48,8 +49,8 @@ pub async fn run_sync(
                     transactions: txs,
                     notes,
                 });
-                // Skip past blocks we already have
-                if block_num >= current_block {
+                // Only advance current_block for contiguous coverage
+                if block_num == current_block {
                     current_block = block_num + 1;
                 }
             }

@@ -90,6 +90,8 @@ pub struct App {
     pub filter: BlockFilter,
     /// Block number and time of the most recently received block (for flash highlight)
     pub last_received_block: Option<(u32, Instant)>,
+    /// Whether sync has caught up to the target
+    pub sync_done: bool,
 }
 
 impl App {
@@ -120,6 +122,7 @@ impl App {
             search_input: None,
             filter: BlockFilter::All,
             last_received_block: None,
+            sync_done: false,
         }
     }
 
@@ -531,9 +534,10 @@ impl App {
             }
             Action::SyncProgress { current, target } => {
                 self.sync_progress = Some((current, target));
+                self.sync_done = false;
             }
             Action::SyncDone => {
-                // Keep showing the last progress values
+                self.sync_done = true;
             }
         }
     }

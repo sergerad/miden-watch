@@ -78,24 +78,29 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(Color::Cyan)
             };
 
+            // Fixed-width columns: relative 8 chars, delta 7 chars
+            let time_col = format!("({relative})");
+            let delta_col = if delta.is_empty() {
+                String::new()
+            } else {
+                delta
+            };
+
             let mut spans = vec![
                 Span::styled(format!(" Block #{:<8}", b.block_num), block_num_style),
                 Span::raw(" | "),
                 Span::styled(ts, Style::default().fg(Color::White)),
                 Span::styled(
-                    format!(" ({})", relative),
+                    format!(" {:<10}", time_col),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{:<7}", delta_col),
                     Style::default().fg(Color::DarkGray),
                 ),
             ];
 
-            if !delta.is_empty() {
-                spans.push(Span::styled(
-                    format!(" {}", delta),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            }
-
-            spans.push(Span::raw(" | "));
+            spans.push(Span::raw("| "));
             spans.push(Span::styled(
                 format!("{} txs", b.tx_count),
                 Style::default().fg(Color::Yellow),
