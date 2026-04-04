@@ -90,10 +90,14 @@ pub struct App {
     pub filter: BlockFilter,
     /// Block number and time of the most recently received block (for flash highlight)
     pub last_received_block: Option<(u32, Instant)>,
+    /// Loading from DB progress
+    pub load_progress: Option<(u32, u32)>,
     /// Whether sync has caught up to the target
     pub sync_done: bool,
     /// Network name derived from the RPC URL
     pub network: String,
+    /// Last measured RPC latency in milliseconds
+    pub latency_ms: Option<u64>,
 }
 
 impl App {
@@ -124,8 +128,10 @@ impl App {
             search_input: None,
             filter: BlockFilter::All,
             last_received_block: None,
+            load_progress: None,
             sync_done: false,
             network,
+            latency_ms: None,
         }
     }
 
@@ -535,12 +541,19 @@ impl App {
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;
             }
+            Action::LoadProgress { current, target } => {
+                self.load_progress = Some((current, target));
+            }
             Action::SyncProgress { current, target } => {
+                self.load_progress = None;
                 self.sync_progress = Some((current, target));
                 self.sync_done = false;
             }
             Action::SyncDone => {
                 self.sync_done = true;
+            }
+            Action::Latency(ms) => {
+                self.latency_ms = Some(ms);
             }
         }
     }

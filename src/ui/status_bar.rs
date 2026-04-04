@@ -18,9 +18,28 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let help_hint = Span::styled(" ?:help ", Style::default().fg(Color::DarkGray));
 
-    let mut top_spans = vec![head_span, Span::raw(" | "), help_hint];
+    let latency_span = if let Some(ms) = app.latency_ms {
+        let (symbol, color) = if ms < 100 {
+            ("●", Color::Green)
+        } else if ms < 500 {
+            ("●", Color::Yellow)
+        } else {
+            ("●", Color::Red)
+        };
+        Span::styled(format!(" {} {}ms ", symbol, ms), Style::default().fg(color))
+    } else {
+        Span::styled(" ○ -- ", Style::default().fg(Color::DarkGray))
+    };
 
-    if let Some((current, target)) = app.sync_progress {
+    let mut top_spans = vec![head_span, Span::raw(" | "), latency_span];
+
+    if let Some((current, target)) = app.load_progress {
+        top_spans.push(Span::raw("| "));
+        top_spans.push(Span::styled(
+            format!("Loading {}/{}", current, target),
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else if let Some((current, target)) = app.sync_progress {
         top_spans.push(Span::raw("| "));
         if app.sync_done {
             top_spans.push(Span::styled(
@@ -46,6 +65,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         ));
     }
+
+    top_spans.push(Span::raw(" | "));
+    top_spans.push(help_hint);
 
     let paragraph = Paragraph::new(Line::from(top_spans))
         .wrap(Wrap { trim: false })

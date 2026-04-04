@@ -27,9 +27,14 @@ pub enum Action {
     CycleFilter,
     NavBack,
     NavForward,
+    LoadProgress {
+        current: u32,
+        target: u32,
+    },
     SyncProgress {
         current: u32,
         target: u32,
     },
     SyncDone,
+    Latency(u64),
 }
