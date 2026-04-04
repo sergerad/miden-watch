@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -87,6 +88,8 @@ pub struct App {
     pub search_input: Option<String>,
     /// Active block list filter
     pub filter: BlockFilter,
+    /// Block number and time of the most recently received block (for flash highlight)
+    pub last_received_block: Option<(u32, Instant)>,
 }
 
 impl App {
@@ -116,6 +119,7 @@ impl App {
             sync_progress: None,
             search_input: None,
             filter: BlockFilter::All,
+            last_received_block: None,
         }
     }
 
@@ -402,7 +406,9 @@ impl App {
             } => {
                 let at_head = self.block_list_state.selected() == Some(0);
                 let selected_bn = self.selected_block_num_filtered();
+                let block_num = block.block_num;
                 self.insert_block(block, transactions, notes);
+                self.last_received_block = Some((block_num, Instant::now()));
 
                 let filtered = self.filtered_indices();
                 if at_head || filtered.len() <= 1 {

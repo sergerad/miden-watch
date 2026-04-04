@@ -1,4 +1,4 @@
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -7,35 +7,106 @@ use ratatui::widgets::{Block, Borders, List, ListItem};
 
 use crate::app::{App, BlockFilter};
 
+fn format_relative(ts: u32) -> String {
+    let now = Utc::now().timestamp() as u32;
+    if ts > now {
+        return "just now".to_string();
+    }
+    let diff = now - ts;
+    if diff < 60 {
+        format!("{}s ago", diff)
+    } else if diff < 3600 {
+        format!("{}m ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h ago", diff / 3600)
+    } else {
+        format!("{}d ago", diff / 86400)
+    }
+}
+
+fn format_delta(newer_ts: u32, older_ts: u32) -> String {
+    if newer_ts <= older_ts {
+        return String::new();
+    }
+    let diff = newer_ts - older_ts;
+    if diff < 60 {
+        format!("+{}s", diff)
+    } else if diff < 3600 {
+        format!("+{}m{}s", diff / 60, diff % 60)
+    } else {
+        format!("+{}h{}m", diff / 3600, (diff % 3600) / 60)
+    }
+}
+
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let filtered = app.filtered_indices();
+
+    // Determine if there's a flash-highlighted block (within 2 seconds)
+    let flash_block_num = app.last_received_block.and_then(|(bn, instant)| {
+        if instant.elapsed().as_secs() < 2 {
+            Some(bn)
+        } else {
+            None
+        }
+    });
+
     let items: Vec<ListItem> = filtered
         .iter()
-        .map(|&ri| &app.blocks[ri])
-        .map(|b| {
+        .enumerate()
+        .map(|(fi, &ri)| {
+            let b = &app.blocks[ri];
+
             let ts = DateTime::from_timestamp(b.timestamp as i64, 0)
                 .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
                 .unwrap_or_else(|| format!("{}", b.timestamp));
 
-            let line = Line::from(vec![
-                Span::styled(
-                    format!(" Block #{:<8}", b.block_num),
-                    Style::default().fg(Color::Cyan),
-                ),
+            let relative = format_relative(b.timestamp);
+
+            // Compute delta to the next (older) block in filtered view
+            let delta = if fi + 1 < filtered.len() {
+                let older = &app.blocks[filtered[fi + 1]];
+                format_delta(b.timestamp, older.timestamp)
+            } else {
+                String::new()
+            };
+
+            let is_flash = flash_block_num == Some(b.block_num);
+
+            let block_num_style = if is_flash {
+                Style::default().fg(Color::Black).bg(Color::Green)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+
+            let mut spans = vec![
+                Span::styled(format!(" Block #{:<8}", b.block_num), block_num_style),
                 Span::raw(" | "),
                 Span::styled(ts, Style::default().fg(Color::White)),
-                Span::raw(" | "),
                 Span::styled(
-                    format!("{} txs", b.tx_count),
-                    Style::default().fg(Color::Yellow),
+                    format!(" ({})", relative),
+                    Style::default().fg(Color::DarkGray),
                 ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("{} notes", b.note_count),
-                    Style::default().fg(Color::Green),
-                ),
-            ]);
-            ListItem::new(line)
+            ];
+
+            if !delta.is_empty() {
+                spans.push(Span::styled(
+                    format!(" {}", delta),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                format!("{} txs", b.tx_count),
+                Style::default().fg(Color::Yellow),
+            ));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("{} notes", b.note_count),
+                Style::default().fg(Color::Green),
+            ));
+
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
