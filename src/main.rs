@@ -72,10 +72,20 @@ async fn main() -> Result<()> {
     // Parse endpoint
     let endpoint = parse_endpoint(&cli.url)?;
 
-    // Set up database path
+    // Detect network from URL
+    let network = detect_network(&cli.url);
+
+    // Set up database path (per-network)
     let db_path = cli.db_path.unwrap_or_else(|| {
         let mut path = dirs_default();
-        path.push("data.db");
+        let db_name = match network.as_str() {
+            "testnet" => "testnet.db",
+            "devnet" => "devnet.db",
+            "mainnet" => "mainnet.db",
+            "local" => "local.db",
+            _ => "other.db",
+        };
+        path.push(db_name);
         path
     });
 
@@ -84,9 +94,6 @@ async fn main() -> Result<()> {
 
     // Set up action channel
     let (action_tx, mut action_rx) = mpsc::unbounded_channel();
-
-    // Detect network from URL
-    let network = detect_network(&cli.url);
 
     // Set up app
     let mut app = App::new(action_tx.clone(), network);

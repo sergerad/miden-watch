@@ -426,7 +426,27 @@ impl App {
                 if at_head || filtered.len() <= 1 {
                     self.block_list_state.select(Some(0));
                 } else if let Some(bn) = selected_bn {
-                    // Find the block in the new filtered view
+                    if let Some(fi) = filtered
+                        .iter()
+                        .position(|&ri| self.blocks[ri].block_num == bn)
+                    {
+                        self.block_list_state.select(Some(fi));
+                    }
+                }
+            }
+            Action::BatchBlocksLoaded { blocks } => {
+                let at_head = self.block_list_state.selected() == Some(0)
+                    || self.block_list_state.selected().is_none();
+                let selected_bn = self.selected_block_num_filtered();
+
+                for (block, transactions, notes) in blocks {
+                    self.insert_block(block, transactions, notes);
+                }
+
+                let filtered = self.filtered_indices();
+                if at_head || filtered.len() <= 1 {
+                    self.block_list_state.select(Some(0));
+                } else if let Some(bn) = selected_bn {
                     if let Some(fi) = filtered
                         .iter()
                         .position(|&ri| self.blocks[ri].block_num == bn)

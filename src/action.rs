@@ -13,6 +13,9 @@ pub enum Action {
         transactions: Vec<TransactionInfo>,
         notes: Vec<NoteInfo>,
     },
+    BatchBlocksLoaded {
+        blocks: Vec<(BlockInfo, Vec<TransactionInfo>, Vec<NoteInfo>)>,
+    },
     SyncError(String),
     ScrollUp,
     ScrollDown,

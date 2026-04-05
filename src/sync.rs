@@ -44,10 +44,11 @@ pub async fn run_sync(
         if total > 0 {
             let mut loaded: u32 = 0;
             let mut offset: u32 = 0;
+            let load_from = current_block;
 
             loop {
                 let blocks = store
-                    .get_blocks_page(current_block, stop_block, BATCH_SIZE, offset)
+                    .get_blocks_page(load_from, stop_block, BATCH_SIZE, offset)
                     .unwrap_or_default();
                 if blocks.is_empty() {
                     break;
@@ -77,25 +78,23 @@ pub async fn run_sync(
                 }
 
                 let batch_len = blocks.len() as u32;
-                for block in blocks {
-                    let block_num = block.block_num;
-                    let txs = txs_by_block.remove(&block_num).unwrap_or_default();
-                    let notes = notes_by_block.remove(&block_num).unwrap_or_default();
-                    let _ = action_tx.send(Action::NewBlockReceived {
-                        block,
-                        transactions: txs,
-                        notes,
-                    });
-                    if block_num == current_block {
-                        current_block = block_num + 1;
-                    }
-                }
-
                 loaded += batch_len;
                 let _ = action_tx.send(Action::LoadProgress {
                     current: loaded,
                     target: total,
                 });
+
+                let mut batch = Vec::with_capacity(blocks.len());
+                for block in blocks {
+                    let block_num = block.block_num;
+                    let txs = txs_by_block.remove(&block_num).unwrap_or_default();
+                    let notes = notes_by_block.remove(&block_num).unwrap_or_default();
+                    if block_num == current_block {
+                        current_block = block_num + 1;
+                    }
+                    batch.push((block, txs, notes));
+                }
+                let _ = action_tx.send(Action::BatchBlocksLoaded { blocks: batch });
 
                 offset += batch_len;
                 if batch_len < BATCH_SIZE {
@@ -137,12 +136,31 @@ pub async fn run_sync(
                     target: sync_until,
                 });
 
+                let fetch_start = std::time::Instant::now();
                 match rpc.fetch_block_data(current_block).await {
                     Ok(sync_result) => {
+                        let latency = fetch_start.elapsed().as_millis() as u64;
+                        let _ = action_tx.send(Action::Latency(latency));
+
                         let store = store.lock().await;
-                        let _ = store.insert_block(&sync_result.block);
-                        let _ = store.insert_transactions(&sync_result.transactions);
-                        let _ = store.insert_notes(&sync_result.notes);
+                        if let Err(e) = store.insert_block(&sync_result.block) {
+                            let _ = action_tx.send(Action::SyncError(format!(
+                                "Failed to store block {}: {e}",
+                                current_block
+                            )));
+                        }
+                        if let Err(e) = store.insert_transactions(&sync_result.transactions) {
+                            let _ = action_tx.send(Action::SyncError(format!(
+                                "Failed to store txs for block {}: {e}",
+                                current_block
+                            )));
+                        }
+                        if let Err(e) = store.insert_notes(&sync_result.notes) {
+                            let _ = action_tx.send(Action::SyncError(format!(
+                                "Failed to store notes for block {}: {e}",
+                                current_block
+                            )));
+                        }
                         drop(store);
 
                         let _ = action_tx.send(Action::NewBlockReceived {
