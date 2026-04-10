@@ -68,7 +68,7 @@ impl RpcClient {
                         sender: output_note.metadata().sender().to_hex(),
                         note_type: format!("{:?}", output_note.metadata().note_type()),
                         tag: output_note.metadata().tag().as_u32(),
-                        note_index: note_index.leaf_index().value() as u32,
+                        note_index: note_index.leaf_index().position() as u32,
                     });
                 }
 
