@@ -17,8 +17,6 @@ pub enum Action {
         blocks: Vec<(BlockInfo, Vec<TransactionInfo>, Vec<NoteInfo>)>,
     },
     SyncError(String),
-    ScrollUp,
-    ScrollDown,
     HalfPageUp,
     HalfPageDown,
     GoToTop,
@@ -40,4 +38,8 @@ pub enum Action {
     },
     SyncDone,
     Latency(u64),
+    ToggleExpandHashes,
+    CopyHash,
+    /// Switch focus between tx list and note list in BlockDetail
+    SwitchDetailFocus,
 }

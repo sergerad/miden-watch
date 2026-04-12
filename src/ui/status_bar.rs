@@ -4,7 +4,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::App;
+use crate::app::{App, Pane};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let head_span = if let Some(block) = app.blocks.first() {
@@ -30,6 +30,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Span::styled(" ○ -- ", Style::default().fg(Color::DarkGray))
     };
+
+    // Breadcrumb trail
+    let breadcrumb = build_breadcrumb(app);
 
     let mut top_spans = vec![head_span, Span::raw(" | "), latency_span];
 
@@ -66,6 +69,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
+    // Clipboard flash
+    if let Some((ref msg, instant)) = app.clipboard_flash {
+        if instant.elapsed().as_secs() < 2 {
+            top_spans.push(Span::raw(" | "));
+            top_spans.push(Span::styled(msg.clone(), Style::default().fg(Color::Green)));
+        }
+    }
+
+    top_spans.push(Span::raw(" | "));
+    top_spans.push(breadcrumb);
     top_spans.push(Span::raw(" | "));
     top_spans.push(help_hint);
 
@@ -74,4 +87,53 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .block(Block::default().borders(Borders::ALL));
 
     frame.render_widget(paragraph, area);
+}
+
+fn build_breadcrumb(app: &App) -> Span<'static> {
+    let trail = match app.active_pane {
+        Pane::BlockList => "Blocks".to_string(),
+        Pane::BlockDetail => {
+            let bn = app
+                .browsing_block_num
+                .map(|n| format!("#{}", n))
+                .unwrap_or_else(|| "?".to_string());
+            format!("Blocks > Block {}", bn)
+        }
+        Pane::TxDetail => {
+            let bn = app
+                .browsing_block_num
+                .map(|n| format!("#{}", n))
+                .unwrap_or_else(|| "?".to_string());
+            let tx_id = app
+                .selected_tx()
+                .map(|t| {
+                    if t.tx_id.len() > 12 {
+                        format!("{}...", &t.tx_id[..12])
+                    } else {
+                        t.tx_id.clone()
+                    }
+                })
+                .unwrap_or_else(|| "?".to_string());
+            format!("Blocks > {} > Tx {}", bn, tx_id)
+        }
+        Pane::NoteDetail => {
+            let bn = app
+                .browsing_block_num
+                .map(|n| format!("#{}", n))
+                .unwrap_or_else(|| "?".to_string());
+            let note_id = app
+                .selected_note()
+                .map(|n| {
+                    if n.note_id.len() > 12 {
+                        format!("{}...", &n.note_id[..12])
+                    } else {
+                        n.note_id.clone()
+                    }
+                })
+                .unwrap_or_else(|| "?".to_string());
+            format!("Blocks > {} > Note {}", bn, note_id)
+        }
+    };
+
+    Span::styled(trail, Style::default().fg(Color::DarkGray))
 }

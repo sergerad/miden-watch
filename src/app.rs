@@ -46,13 +46,34 @@ pub enum Pane {
     NoteDetail,
 }
 
+/// Which sub-panel has focus within the BlockDetail view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailFocus {
+    Block,
+    Txs,
+    Notes,
+}
+
+impl DetailFocus {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Block => Self::Txs,
+            Self::Txs => Self::Notes,
+            Self::Notes => Self::Block,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct NavEntry {
     pane: Pane,
     browsing_block_num: Option<u32>,
     block_list_selected: Option<usize>,
     tx_list_selected: Option<usize>,
+    note_list_selected: Option<usize>,
     detail_scroll: u16,
+    detail_focus: DetailFocus,
+    detail_row_selected: Option<usize>,
 }
 
 pub struct App {
@@ -98,6 +119,16 @@ pub struct App {
     pub network: String,
     /// Last measured RPC latency in milliseconds
     pub latency_ms: Option<u64>,
+    /// Whether to show full hex hashes or truncated
+    pub expand_hashes: bool,
+    /// Which sub-panel has focus in BlockDetail
+    pub detail_focus: DetailFocus,
+    /// Clipboard status message (shown briefly)
+    pub clipboard_flash: Option<(String, Instant)>,
+    /// Row selection state for detail views (TxDetail, NoteDetail)
+    pub detail_row_state: ListState,
+    /// The key-value rows currently displayed in the detail view (for copy)
+    pub detail_rows: Vec<(String, String)>,
 }
 
 impl App {
@@ -132,6 +163,11 @@ impl App {
             sync_done: false,
             network,
             latency_ms: None,
+            expand_hashes: false,
+            detail_focus: DetailFocus::Block,
+            clipboard_flash: None,
+            detail_row_state: ListState::default(),
+            detail_rows: Vec::new(),
         }
     }
 
@@ -226,9 +262,12 @@ impl App {
             }
         }
 
-        // Tab is Ctrl+I in most terminals — nav forward
+        // Tab: switch focus in BlockDetail, nav forward elsewhere
         if key.code == KeyCode::Tab {
             self.pending_g = false;
+            if self.active_pane == Pane::BlockDetail {
+                return Some(Action::SwitchDetailFocus);
+            }
             return Some(Action::NavForward);
         }
 
@@ -280,6 +319,8 @@ impl App {
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
+                KeyCode::Char('e') => Some(Action::ToggleExpandHashes),
+                KeyCode::Char('y') => Some(Action::CopyHash),
                 _ => None,
             },
             Pane::TxDetail => match key.code {
@@ -287,8 +328,11 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
                     Some(Action::Back)
                 }
-                KeyCode::Char('j') | KeyCode::Down => Some(Action::ScrollDown),
-                KeyCode::Char('k') | KeyCode::Up => Some(Action::ScrollUp),
+                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
+                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
+                KeyCode::Char('e') => Some(Action::ToggleExpandHashes),
+                KeyCode::Char('y') => Some(Action::CopyHash),
                 _ => None,
             },
             Pane::NoteDetail => match key.code {
@@ -296,8 +340,10 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
                     Some(Action::Back)
                 }
-                KeyCode::Char('j') | KeyCode::Down => Some(Action::ScrollDown),
-                KeyCode::Char('k') | KeyCode::Up => Some(Action::ScrollUp),
+                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
+                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
+                KeyCode::Char('e') => Some(Action::ToggleExpandHashes),
+                KeyCode::Char('y') => Some(Action::CopyHash),
                 _ => None,
             },
         }
@@ -331,8 +377,14 @@ impl App {
                             }
                             self.select_prev_block(n);
                         }
-                        Pane::BlockDetail => self.select_prev_tx(n),
-                        _ => {}
+                        Pane::BlockDetail => match self.detail_focus {
+                            DetailFocus::Block => self.select_prev_detail_row(n),
+                            DetailFocus::Txs => self.select_prev_tx(n),
+                            DetailFocus::Notes => self.select_prev_note(n),
+                        },
+                        Pane::TxDetail | Pane::NoteDetail => {
+                            self.select_prev_detail_row(n);
+                        }
                     }
                 }
             }
@@ -347,8 +399,14 @@ impl App {
                             }
                             self.select_next_block(n);
                         }
-                        Pane::BlockDetail => self.select_next_tx(n),
-                        _ => {}
+                        Pane::BlockDetail => match self.detail_focus {
+                            DetailFocus::Block => self.select_next_detail_row(n),
+                            DetailFocus::Txs => self.select_next_tx(n),
+                            DetailFocus::Notes => self.select_next_note(n),
+                        },
+                        Pane::TxDetail | Pane::NoteDetail => {
+                            self.select_next_detail_row(n);
+                        }
                     }
                 }
             }
@@ -364,24 +422,35 @@ impl App {
                         }
                     }
                 }
-                Pane::BlockDetail => {
-                    if let Some(idx) = self.tx_list_state.selected() {
-                        if idx < self.selected_block_txs.len() {
-                            self.push_nav();
-                            self.detail_scroll = 0;
-                            self.active_pane = Pane::TxDetail;
+                Pane::BlockDetail => match self.detail_focus {
+                    DetailFocus::Block => {
+                        // Block info focused — no drill-down, but could copy
+                    }
+                    DetailFocus::Notes => {
+                        if let Some(idx) = self.note_list_state.selected() {
+                            if idx < self.selected_block_notes.len() {
+                                self.push_nav();
+                                self.enter_detail_view(Pane::NoteDetail);
+                            }
                         }
                     }
-                    // If no txs selected, try notes
-                    if self.active_pane == Pane::BlockDetail
-                        && self.selected_block_txs.is_empty()
-                        && !self.selected_block_notes.is_empty()
-                    {
+                    DetailFocus::Txs => {
+                        if let Some(idx) = self.tx_list_state.selected() {
+                            if idx < self.selected_block_txs.len() {
+                                self.push_nav();
+                                self.enter_detail_view(Pane::TxDetail);
+                            }
+                        }
+                    }
+                },
+                Pane::TxDetail => {
+                    // Enter in TxDetail: navigate to NoteDetail if there are notes
+                    if !self.selected_block_notes.is_empty() {
                         self.push_nav();
-                        self.note_list_state = ListState::default();
-                        self.note_list_state.select(Some(0));
-                        self.detail_scroll = 0;
-                        self.active_pane = Pane::NoteDetail;
+                        if self.note_list_state.selected().is_none() {
+                            self.note_list_state.select(Some(0));
+                        }
+                        self.enter_detail_view(Pane::NoteDetail);
                     }
                 }
                 _ => {}
@@ -458,12 +527,6 @@ impl App {
             Action::SyncError(msg) => {
                 self.error_log.push(msg);
             }
-            Action::ScrollUp => {
-                self.detail_scroll = self.detail_scroll.saturating_sub(1);
-            }
-            Action::ScrollDown => {
-                self.detail_scroll = self.detail_scroll.saturating_add(1);
-            }
             Action::HalfPageUp => match self.active_pane {
                 Pane::BlockList => {
                     let flen = self.filtered_indices().len();
@@ -474,13 +537,21 @@ impl App {
                         self.block_list_state.select(Some(target));
                     }
                 }
-                Pane::BlockDetail => {
-                    let current = self.tx_list_state.selected().unwrap_or(0);
-                    let target = current.saturating_sub(HALF_PAGE);
-                    self.tx_list_state.select(Some(target));
-                }
+                Pane::BlockDetail => match self.detail_focus {
+                    DetailFocus::Block => self.select_prev_detail_row(HALF_PAGE),
+                    DetailFocus::Txs => {
+                        let current = self.tx_list_state.selected().unwrap_or(0);
+                        let target = current.saturating_sub(HALF_PAGE);
+                        self.tx_list_state.select(Some(target));
+                    }
+                    DetailFocus::Notes => {
+                        let current = self.note_list_state.selected().unwrap_or(0);
+                        let target = current.saturating_sub(HALF_PAGE);
+                        self.note_list_state.select(Some(target));
+                    }
+                },
                 Pane::TxDetail | Pane::NoteDetail => {
-                    self.detail_scroll = self.detail_scroll.saturating_sub(HALF_PAGE as u16);
+                    self.select_prev_detail_row(HALF_PAGE);
                 }
             },
             Action::HalfPageDown => match self.active_pane {
@@ -493,15 +564,27 @@ impl App {
                         self.block_list_state.select(Some(target));
                     }
                 }
-                Pane::BlockDetail => {
-                    if !self.selected_block_txs.is_empty() {
-                        let current = self.tx_list_state.selected().unwrap_or(0);
-                        let target = (current + HALF_PAGE).min(self.selected_block_txs.len() - 1);
-                        self.tx_list_state.select(Some(target));
+                Pane::BlockDetail => match self.detail_focus {
+                    DetailFocus::Block => self.select_next_detail_row(HALF_PAGE),
+                    DetailFocus::Txs => {
+                        if !self.selected_block_txs.is_empty() {
+                            let current = self.tx_list_state.selected().unwrap_or(0);
+                            let target =
+                                (current + HALF_PAGE).min(self.selected_block_txs.len() - 1);
+                            self.tx_list_state.select(Some(target));
+                        }
                     }
-                }
+                    DetailFocus::Notes => {
+                        if !self.selected_block_notes.is_empty() {
+                            let current = self.note_list_state.selected().unwrap_or(0);
+                            let target =
+                                (current + HALF_PAGE).min(self.selected_block_notes.len() - 1);
+                            self.note_list_state.select(Some(target));
+                        }
+                    }
+                },
                 Pane::TxDetail | Pane::NoteDetail => {
-                    self.detail_scroll = self.detail_scroll.saturating_add(HALF_PAGE as u16);
+                    self.select_next_detail_row(HALF_PAGE);
                 }
             },
             Action::GoToTop => match self.active_pane {
@@ -511,13 +594,27 @@ impl App {
                         self.block_list_state.select(Some(0));
                     }
                 }
-                Pane::BlockDetail => {
-                    if !self.selected_block_txs.is_empty() {
-                        self.tx_list_state.select(Some(0));
+                Pane::BlockDetail => match self.detail_focus {
+                    DetailFocus::Block => {
+                        if !self.detail_rows.is_empty() {
+                            self.detail_row_state.select(Some(0));
+                        }
                     }
-                }
+                    DetailFocus::Txs => {
+                        if !self.selected_block_txs.is_empty() {
+                            self.tx_list_state.select(Some(0));
+                        }
+                    }
+                    DetailFocus::Notes => {
+                        if !self.selected_block_notes.is_empty() {
+                            self.note_list_state.select(Some(0));
+                        }
+                    }
+                },
                 Pane::TxDetail | Pane::NoteDetail => {
-                    self.detail_scroll = 0;
+                    if !self.detail_rows.is_empty() {
+                        self.detail_row_state.select(Some(0));
+                    }
                 }
             },
             Action::GoToBottom => match self.active_pane {
@@ -528,14 +625,31 @@ impl App {
                         self.block_list_state.select(Some(flen - 1));
                     }
                 }
-                Pane::BlockDetail => {
-                    if !self.selected_block_txs.is_empty() {
-                        self.tx_list_state
-                            .select(Some(self.selected_block_txs.len() - 1));
+                Pane::BlockDetail => match self.detail_focus {
+                    DetailFocus::Block => {
+                        if !self.detail_rows.is_empty() {
+                            self.detail_row_state
+                                .select(Some(self.detail_rows.len() - 1));
+                        }
                     }
-                }
+                    DetailFocus::Txs => {
+                        if !self.selected_block_txs.is_empty() {
+                            self.tx_list_state
+                                .select(Some(self.selected_block_txs.len() - 1));
+                        }
+                    }
+                    DetailFocus::Notes => {
+                        if !self.selected_block_notes.is_empty() {
+                            self.note_list_state
+                                .select(Some(self.selected_block_notes.len() - 1));
+                        }
+                    }
+                },
                 Pane::TxDetail | Pane::NoteDetail => {
-                    self.detail_scroll = u16::MAX / 2;
+                    if !self.detail_rows.is_empty() {
+                        self.detail_row_state
+                            .select(Some(self.detail_rows.len() - 1));
+                    }
                 }
             },
             Action::SearchBlock(block_num) => {
@@ -575,6 +689,41 @@ impl App {
             Action::Latency(ms) => {
                 self.latency_ms = Some(ms);
             }
+            Action::ToggleExpandHashes => {
+                self.expand_hashes = !self.expand_hashes;
+            }
+            Action::CopyHash => {
+                self.copy_selected_hash();
+            }
+            Action::SwitchDetailFocus => {
+                if self.active_pane == Pane::BlockDetail {
+                    self.detail_focus = self.detail_focus.next();
+                    match self.detail_focus {
+                        DetailFocus::Block => {
+                            // Initialize block row selection
+                            if self.detail_row_state.selected().is_none()
+                                && !self.detail_rows.is_empty()
+                            {
+                                self.detail_row_state.select(Some(0));
+                            }
+                        }
+                        DetailFocus::Txs => {
+                            if self.tx_list_state.selected().is_none()
+                                && !self.selected_block_txs.is_empty()
+                            {
+                                self.tx_list_state.select(Some(0));
+                            }
+                        }
+                        DetailFocus::Notes => {
+                            if self.note_list_state.selected().is_none()
+                                && !self.selected_block_notes.is_empty()
+                            {
+                                self.note_list_state.select(Some(0));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -593,7 +742,10 @@ impl App {
             browsing_block_num: self.browsing_block_num,
             block_list_selected: self.block_list_state.selected(),
             tx_list_selected: self.tx_list_state.selected(),
+            note_list_selected: self.note_list_state.selected(),
             detail_scroll: self.detail_scroll,
+            detail_focus: self.detail_focus,
+            detail_row_selected: self.detail_row_state.selected(),
         }
     }
 
@@ -607,6 +759,7 @@ impl App {
         self.browsing_block_num = entry.browsing_block_num;
         self.block_list_state.select(entry.block_list_selected);
         self.detail_scroll = entry.detail_scroll;
+        self.detail_focus = entry.detail_focus;
 
         // Restore detail view data if we're going back to a block detail/tx/note view
         if let Some(bn) = entry.browsing_block_num {
@@ -618,7 +771,11 @@ impl App {
             self.selected_block_notes = self.block_notes.get(&bn).cloned().unwrap_or_default();
             self.tx_list_state = ListState::default();
             self.tx_list_state.select(entry.tx_list_selected);
+            self.note_list_state = ListState::default();
+            self.note_list_state.select(entry.note_list_selected);
         }
+        self.detail_row_state = ListState::default();
+        self.detail_row_state.select(entry.detail_row_selected);
     }
 
     /// Pin the detail view to a specific block number
@@ -635,8 +792,16 @@ impl App {
             .cloned()
             .unwrap_or_default();
         self.tx_list_state = ListState::default();
+        self.note_list_state = ListState::default();
+        self.detail_focus = DetailFocus::Block;
+        self.detail_row_state = ListState::default();
+        self.detail_row_state.select(Some(0));
+        self.detail_rows.clear();
         if !self.selected_block_txs.is_empty() {
             self.tx_list_state.select(Some(0));
+        }
+        if !self.selected_block_notes.is_empty() {
+            self.note_list_state.select(Some(0));
         }
     }
 
@@ -776,5 +941,99 @@ impl App {
         self.tx_list_state
             .selected()
             .and_then(|i| self.selected_block_txs.get(i))
+    }
+
+    pub fn selected_note(&self) -> Option<&NoteInfo> {
+        self.note_list_state
+            .selected()
+            .and_then(|i| self.selected_block_notes.get(i))
+    }
+
+    fn select_next_note(&mut self, n: usize) {
+        if self.selected_block_notes.is_empty() {
+            return;
+        }
+        let i = match self.note_list_state.selected() {
+            Some(i) => (i + n).min(self.selected_block_notes.len() - 1),
+            None => 0,
+        };
+        self.note_list_state.select(Some(i));
+    }
+
+    fn select_prev_note(&mut self, n: usize) {
+        if self.selected_block_notes.is_empty() {
+            return;
+        }
+        let i = match self.note_list_state.selected() {
+            Some(i) => i.saturating_sub(n),
+            None => 0,
+        };
+        self.note_list_state.select(Some(i));
+    }
+
+    /// Enter a detail view (TxDetail or NoteDetail), resetting row selection
+    fn enter_detail_view(&mut self, pane: Pane) {
+        self.active_pane = pane;
+        self.detail_row_state = ListState::default();
+        self.detail_row_state.select(Some(0));
+        self.detail_rows.clear();
+    }
+
+    fn select_next_detail_row(&mut self, n: usize) {
+        if self.detail_rows.is_empty() {
+            return;
+        }
+        let i = match self.detail_row_state.selected() {
+            Some(i) => (i + n).min(self.detail_rows.len() - 1),
+            None => 0,
+        };
+        self.detail_row_state.select(Some(i));
+    }
+
+    fn select_prev_detail_row(&mut self, n: usize) {
+        if self.detail_rows.is_empty() {
+            return;
+        }
+        let i = match self.detail_row_state.selected() {
+            Some(i) => i.saturating_sub(n),
+            None => 0,
+        };
+        self.detail_row_state.select(Some(i));
+    }
+
+    fn copy_selected_hash(&mut self) {
+        let value = match self.active_pane {
+            Pane::BlockDetail => match self.detail_focus {
+                DetailFocus::Block => self
+                    .detail_row_state
+                    .selected()
+                    .and_then(|i| self.detail_rows.get(i))
+                    .map(|(_, v)| v.clone()),
+                DetailFocus::Txs => self.selected_tx().map(|t| t.tx_id.clone()),
+                DetailFocus::Notes => self.selected_note().map(|n| n.note_id.clone()),
+            },
+            Pane::TxDetail | Pane::NoteDetail => {
+                // Copy the value of the highlighted row
+                self.detail_row_state
+                    .selected()
+                    .and_then(|i| self.detail_rows.get(i))
+                    .map(|(_, v)| v.clone())
+            }
+            _ => None,
+        };
+
+        if let Some(value) = value {
+            if let Ok(mut child) = std::process::Command::new("pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                use std::io::Write;
+                if let Some(ref mut stdin) = child.stdin {
+                    let _ = stdin.write_all(value.as_bytes());
+                }
+                let _ = child.wait();
+                self.clipboard_flash = Some(("Copied!".to_string(), Instant::now()));
+            }
+        }
     }
 }

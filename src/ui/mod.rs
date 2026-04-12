@@ -61,7 +61,7 @@ fn render_help_popup(frame: &mut Frame) {
     let area = frame.area();
 
     let popup_width = 50u16.min(area.width.saturating_sub(4));
-    let popup_height = 24u16.min(area.height.saturating_sub(4));
+    let popup_height = 30u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -103,12 +103,24 @@ fn render_help_popup(frame: &mut Frame) {
             Span::styled("Go back", desc_style),
         ]),
         Line::from(vec![
+            Span::styled("  Tab         ", key_style),
+            Span::styled("Switch focus: txs/notes", desc_style),
+        ]),
+        Line::from(vec![
             Span::styled("  /           ", key_style),
             Span::styled("Search by block number", desc_style),
         ]),
         Line::from(vec![
             Span::styled("  f           ", key_style),
             Span::styled("Cycle block filter", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  e           ", key_style),
+            Span::styled("Expand/collapse hashes", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  y           ", key_style),
+            Span::styled("Copy selected hash", desc_style),
         ]),
         Line::from(vec![
             Span::styled("  Ctrl+o      ", key_style),
