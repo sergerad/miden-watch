@@ -2,10 +2,20 @@
 
 A terminal UI for exploring Miden blockchain data in real-time. Connects to a Miden node via gRPC, polls for new blocks, and lets you browse blocks, transactions, and notes with vim-style navigation. All synced data is persisted locally in SQLite.
 
+## Versioning
+
+`miden-watch` versions match the Miden node version they are compatible with. For example, `miden-watch` v0.14.x is compatible with Miden node v0.14.x.
+
+## Installation
+
+```bash
+cargo install miden-watch
+```
+
 ## Usage
 
 ```
-cargo run -- [OPTIONS]
+miden-watch [OPTIONS]
 ```
 
 ### Options
@@ -23,16 +33,16 @@ The `--url` flag can also be set via the `MIDEN_NODE_URL` environment variable.
 
 ```bash
 # Connect to a local node starting from the chain tip
-cargo run
+miden-watch
 
 # Sync all blocks from genesis
-cargo run -- --from genesis
+miden-watch --from genesis
 
 # Sync a specific range
-cargo run -- --from 500 --to 1000
+miden-watch --from 500 --to 1000
 
 # Connect to testnet
-cargo run -- --url https://rpc.testnet.miden.io
+miden-watch --url https://rpc.testnet.miden.io
 ```
 
 ## Keybindings

@@ -1,7 +1,12 @@
 [package]
 name = "miden-watch"
-version = "0.1.0"
+version = "0.14.0"
 edition = "2024"
+description = "A terminal UI block explorer for the Miden blockchain"
+license = "MIT"
+repository = "https://github.com/sergerad/miden-watch"
+keywords = ["miden", "blockchain", "tui", "explorer"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "miden-watch"
