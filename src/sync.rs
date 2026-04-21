@@ -20,6 +20,13 @@ pub async fn run_sync(
 ) -> Result<()> {
     let rpc = RpcClient::new(&endpoint);
 
+    // For Tip mode, cache covers all stored blocks (not just from the current tip).
+    // Use a reference here so start_from is not consumed before the current_block match.
+    let cache_load_from = match &start_from {
+        StartFrom::Block(n) => *n,
+        StartFrom::Genesis | StartFrom::Tip => 0,
+    };
+
     // Determine starting block
     let mut current_block = match start_from {
         StartFrom::Genesis => 0,
@@ -38,13 +45,13 @@ pub async fn run_sync(
         const BATCH_SIZE: u32 = 500;
         let store = store.lock().await;
         let total = store
-            .count_blocks_in_range(current_block, stop_block)
+            .count_blocks_in_range(cache_load_from, stop_block)
             .unwrap_or(0);
 
         if total > 0 {
             let mut loaded: u32 = 0;
             let mut offset: u32 = 0;
-            let load_from = current_block;
+            let load_from = cache_load_from;
 
             loop {
                 let blocks = store
@@ -100,6 +107,18 @@ pub async fn run_sync(
                 if batch_len < BATCH_SIZE {
                     break;
                 }
+            }
+        }
+    }
+
+    // For Tip mode: resume from where we left off rather than jumping to the current tip,
+    // so blocks that arrived between runs are not skipped.
+    {
+        let store = store.lock().await;
+        if let Ok(Some(latest)) = store.get_latest_block_num() {
+            let resume = latest + 1;
+            if resume < current_block {
+                current_block = resume;
             }
         }
     }
