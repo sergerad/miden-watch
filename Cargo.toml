@@ -1,6 +1,6 @@
 [package]
 name = "miden-watch"
-version = "0.14.0"
+version = "0.14.1"
 edition = "2024"
 description = "A terminal UI block explorer for the Miden blockchain"
 license = "MIT"
