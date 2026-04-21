@@ -197,10 +197,25 @@ pub fn render_tx_and_notes(frame: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 tx.account_id.clone()
             };
+            let mode_color = match tx.account_storage_mode.as_str() {
+                "public" => Color::Green,
+                "private" => Color::Red,
+                "network" => Color::DarkGray,
+                _ => Color::White,
+            };
+            let mode_label = match tx.account_storage_mode.as_str() {
+                "public" => "pub",
+                "private" => "priv",
+                "network" => "net",
+                _ => "?",
+            };
             let line = Line::from(vec![
                 Span::styled(format!(" {}", id_short), Style::default().fg(Color::Cyan)),
                 Span::raw(" | "),
                 Span::styled(acct_short, Style::default().fg(Color::Yellow)),
+                Span::raw(" ["),
+                Span::styled(mode_label, Style::default().fg(mode_color)),
+                Span::raw("]"),
             ]);
             ListItem::new(line)
         })

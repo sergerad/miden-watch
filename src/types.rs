@@ -45,6 +45,7 @@ pub struct BlockInfo {
 pub struct TransactionInfo {
     pub tx_id: String,
     pub account_id: String,
+    pub account_storage_mode: String,
     pub block_num: u32,
     pub input_note_count: usize,
     pub output_note_count: usize,

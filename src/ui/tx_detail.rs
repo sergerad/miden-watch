@@ -33,6 +33,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut rows: Vec<(String, String)> = vec![
         ("Transaction ID".to_string(), tx.tx_id.clone()),
         ("Account ID".to_string(), tx.account_id.clone()),
+        ("Account Type".to_string(), tx.account_storage_mode.clone()),
         ("Block Number".to_string(), format!("#{}", tx.block_num)),
         (
             "Input Notes".to_string(),
@@ -60,8 +61,15 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|(label, value)| {
             let value_color = if label.starts_with("Transaction") {
                 Color::Cyan
-            } else if label.starts_with("Account") {
+            } else if label == "Account ID" {
                 Color::Yellow
+            } else if label == "Account Type" {
+                match value.as_str() {
+                    "public" => Color::Green,
+                    "private" => Color::Red,
+                    "network" => Color::DarkGray,
+                    _ => Color::White,
+                }
             } else if label.starts_with("Note ") {
                 Color::Green
             } else {

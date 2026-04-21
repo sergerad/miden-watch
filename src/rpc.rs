@@ -54,6 +54,10 @@ impl RpcClient {
                     transactions.push(TransactionInfo {
                         tx_id: tx_header.id().to_hex(),
                         account_id: tx_header.account_id().to_hex(),
+                        account_storage_mode: tx_header
+                            .account_id()
+                            .storage_mode()
+                            .to_string(),
                         block_num,
                         input_note_count: tx_header.input_notes().iter().count(),
                         output_note_count: tx_header.output_notes().len(),

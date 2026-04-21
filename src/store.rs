@@ -31,6 +31,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS transactions (
                 tx_id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL,
+                account_storage_mode TEXT NOT NULL DEFAULT '',
                 block_num INTEGER NOT NULL,
                 input_note_count INTEGER NOT NULL,
                 output_note_count INTEGER NOT NULL,
@@ -80,11 +81,12 @@ impl Store {
         for tx in txs {
             self.conn.execute(
                 "INSERT OR REPLACE INTO transactions (
-                    tx_id, account_id, block_num, input_note_count, output_note_count
-                ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    tx_id, account_id, account_storage_mode, block_num, input_note_count, output_note_count
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![
                     tx.tx_id,
                     tx.account_id,
+                    tx.account_storage_mode,
                     tx.block_num,
                     tx.input_note_count,
                     tx.output_note_count,
@@ -180,16 +182,17 @@ impl Store {
 
     pub fn get_transactions_for_block(&self, block_num: u32) -> Result<Vec<TransactionInfo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT tx_id, account_id, block_num, input_note_count, output_note_count
+            "SELECT tx_id, account_id, account_storage_mode, block_num, input_note_count, output_note_count
              FROM transactions WHERE block_num = ?1",
         )?;
         let rows = stmt.query_map(rusqlite::params![block_num], |row| {
             Ok(TransactionInfo {
                 tx_id: row.get(0)?,
                 account_id: row.get(1)?,
-                block_num: row.get(2)?,
-                input_note_count: row.get::<_, i64>(3)? as usize,
-                output_note_count: row.get::<_, i64>(4)? as usize,
+                account_storage_mode: row.get(2)?,
+                block_num: row.get(3)?,
+                input_note_count: row.get::<_, i64>(4)? as usize,
+                output_note_count: row.get::<_, i64>(5)? as usize,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -271,7 +274,7 @@ impl Store {
         to_block: u32,
     ) -> Result<Vec<TransactionInfo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT tx_id, account_id, block_num, input_note_count, output_note_count
+            "SELECT tx_id, account_id, account_storage_mode, block_num, input_note_count, output_note_count
              FROM transactions WHERE block_num >= ?1 AND block_num <= ?2
              ORDER BY block_num ASC",
         )?;
@@ -279,9 +282,10 @@ impl Store {
             Ok(TransactionInfo {
                 tx_id: row.get(0)?,
                 account_id: row.get(1)?,
-                block_num: row.get(2)?,
-                input_note_count: row.get::<_, i64>(3)? as usize,
-                output_note_count: row.get::<_, i64>(4)? as usize,
+                account_storage_mode: row.get(2)?,
+                block_num: row.get(3)?,
+                input_note_count: row.get::<_, i64>(4)? as usize,
+                output_note_count: row.get::<_, i64>(5)? as usize,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
