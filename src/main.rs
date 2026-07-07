@@ -1,3 +1,4 @@
+mod account_worker;
 mod action;
 mod app;
 mod event;
@@ -95,8 +96,11 @@ async fn main() -> Result<()> {
     // Set up action channel
     let (action_tx, mut action_rx) = mpsc::unbounded_channel();
 
+    // Set up the account-lookup request channel (App -> account worker)
+    let (acct_req_tx, acct_req_rx) = mpsc::unbounded_channel::<String>();
+
     // Set up app
-    let mut app = App::new(action_tx.clone(), network);
+    let mut app = App::new(action_tx.clone(), acct_req_tx, network);
 
     // Set up terminal
     enable_raw_mode()?;
@@ -104,6 +108,17 @@ async fn main() -> Result<()> {
     execute!(stderr, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stderr);
     let mut terminal = Terminal::new(backend)?;
+
+    // Spawn account-lookup worker (owns its own RpcClient, like the sync task)
+    let acct_store = store.clone();
+    let acct_action_tx = action_tx.clone();
+    let acct_endpoint = endpoint.clone();
+    tokio::spawn(account_worker::run(
+        acct_endpoint,
+        acct_store,
+        acct_req_rx,
+        acct_action_tx,
+    ));
 
     // Spawn sync task
     let sync_store = store.clone();

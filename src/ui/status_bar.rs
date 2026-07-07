@@ -133,6 +133,20 @@ fn build_breadcrumb(app: &App) -> Span<'static> {
                 .unwrap_or_else(|| "?".to_string());
             format!("Blocks > {} > Note {}", bn, note_id)
         }
+        Pane::AccountDetail => {
+            let id = app
+                .pending_account
+                .as_deref()
+                .map(|id| {
+                    if id.len() > 12 {
+                        format!("{}...", &id[..12])
+                    } else {
+                        id.to_string()
+                    }
+                })
+                .unwrap_or_else(|| "?".to_string());
+            format!("Account {}", id)
+        }
     };
 
     Span::styled(trail, Style::default().fg(Color::DarkGray))

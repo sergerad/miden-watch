@@ -138,7 +138,7 @@ pub fn render_block_info(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     let focus_hint = match app.detail_focus {
-        DetailFocus::Block => " [Tab:txs]",
+        DetailFocus::Block => " [→/Tab:txs]",
         _ => "",
     };
     let title = format!(" Block #{}{} ", block.block_num, focus_hint);
@@ -230,7 +230,7 @@ pub fn render_tx_and_notes(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let tx_title = if tx_focused {
         format!(
-            " Transactions ({}) [Tab:notes] ",
+            " Transactions ({}) [↓:notes ←:block] ",
             app.selected_block_txs.len()
         )
     } else {
@@ -257,23 +257,34 @@ pub fn render_tx_and_notes(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(tx_list, chunks[0], &mut app.tx_list_state);
 
     // Note list
+    let short = |s: &str, n: usize| -> String {
+        if s.len() > n {
+            format!("{}…", &s[..n])
+        } else {
+            s.to_string()
+        }
+    };
     let note_items: Vec<ListItem> = app
         .selected_block_notes
         .iter()
         .map(|note| {
-            let id_short = if note.note_id.len() > 16 {
-                format!("{}...", &note.note_id[..16])
-            } else {
-                note.note_id.clone()
-            };
-            let line = Line::from(vec![
-                Span::styled(format!(" {}", id_short), Style::default().fg(Color::Green)),
+            // Prefer the semantic kind (P2ID/SWAP/…); fall back to Public/Private.
+            let kind = note
+                .standard_type
+                .clone()
+                .unwrap_or_else(|| note.note_type.clone());
+            let mut spans = vec![
+                Span::styled(format!(" {}", short(&note.note_id, 10)), Style::default().fg(Color::Green)),
                 Span::raw(" | "),
-                Span::styled(&note.note_type, Style::default().fg(Color::Yellow)),
-                Span::raw(" | tag:"),
-                Span::styled(format!("{}", note.tag), Style::default().fg(Color::White)),
-            ]);
-            ListItem::new(line)
+                Span::styled(kind, Style::default().fg(Color::Yellow)),
+                Span::raw(" from:"),
+                Span::styled(short(&note.sender, 8), Style::default().fg(Color::Cyan)),
+            ];
+            if let Some(target) = &note.target {
+                spans.push(Span::raw(" → "));
+                spans.push(Span::styled(short(target, 8), Style::default().fg(Color::Magenta)));
+            }
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -285,7 +296,10 @@ pub fn render_tx_and_notes(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let note_title = if note_focused {
-        format!(" Notes ({}) [Tab:block] ", app.selected_block_notes.len())
+        format!(
+            " Notes ({}) [↑:txs ←:block Enter⏎] ",
+            app.selected_block_notes.len()
+        )
     } else {
         format!(" Notes ({}) ", app.selected_block_notes.len())
     };
