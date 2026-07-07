@@ -1,6 +1,6 @@
 [package]
 name = "miden-watch"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
 description = "A terminal UI block explorer for the Miden blockchain"
 license = "MIT"
@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Miden
-miden-client = { version = "0.14.0", features = ["std", "tonic"] }
+miden-client = { version = "0.15", features = ["std", "tonic"] }
 
 # TUI
 ratatui = "0.29"

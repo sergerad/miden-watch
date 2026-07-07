@@ -45,7 +45,7 @@ impl RpcClient {
         let mut transactions = Vec::new();
         let mut notes = Vec::new();
 
-        match self.client.get_block_by_number(bn).await {
+        match self.client.get_block_by_number(bn, false).await {
             Ok(proven_block) => {
                 let body = proven_block.body();
 
@@ -56,7 +56,7 @@ impl RpcClient {
                         account_id: tx_header.account_id().to_hex(),
                         account_storage_mode: tx_header
                             .account_id()
-                            .storage_mode()
+                            .account_type()
                             .to_string(),
                         block_num,
                         input_note_count: tx_header.input_notes().iter().count(),

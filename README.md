@@ -4,7 +4,7 @@ A terminal UI for exploring Miden blockchain data in real-time. Connects to a Mi
 
 ## Versioning
 
-`miden-watch` versions match the Miden node version they are compatible with. For example, `miden-watch` v0.14.x is compatible with Miden node v0.14.x.
+`miden-watch` versions match the Miden node version they are compatible with. For example, `miden-watch` v0.15.x is compatible with Miden node v0.15.x.
 
 ## Installation
 
