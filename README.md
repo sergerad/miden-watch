@@ -22,7 +22,7 @@ miden-watch [OPTIONS]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--url <URL>` | Miden node RPC URL | `http://localhost:57291` |
+| `--url <URL>` | Miden node RPC URL | `https://rpc.testnet.miden.io` |
 | `--from <START>` | Where to start syncing: `tip`, `genesis`, or a block number | `tip` |
 | `--to <BLOCK>` | Block number to stop syncing at | None (keeps tailing) |
 | `--db-path <PATH>` | Path to SQLite database file | `~/.miden-watch/data.db` |
@@ -32,7 +32,7 @@ The `--url` flag can also be set via the `MIDEN_NODE_URL` environment variable.
 ### Examples
 
 ```bash
-# Connect to a local node starting from the chain tip
+# Connect to testnet (the default) starting from the chain tip
 miden-watch
 
 # Sync all blocks from genesis
@@ -41,8 +41,8 @@ miden-watch --from genesis
 # Sync a specific range
 miden-watch --from 500 --to 1000
 
-# Connect to testnet
-miden-watch --url https://rpc.testnet.miden.io
+# Connect to a local node
+miden-watch --url http://localhost:57291
 ```
 
 ## Keybindings

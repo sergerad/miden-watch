@@ -34,7 +34,7 @@ struct Cli {
     #[arg(
         long = "url",
         env = "MIDEN_NODE_URL",
-        default_value = "http://localhost:57291"
+        default_value = "https://rpc.testnet.miden.io"
     )]
     url: String,
 
