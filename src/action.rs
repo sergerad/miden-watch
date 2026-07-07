@@ -1,4 +1,4 @@
-use crate::types::{BlockInfo, NoteInfo, TransactionInfo};
+use crate::types::{AccountInfo, BlockInfo, NoteInfo, TransactionInfo};
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -42,4 +42,8 @@ pub enum Action {
     CopyHash,
     /// Switch focus between tx list and note list in BlockDetail
     SwitchDetailFocus,
+    /// Open the account view for the given account id (hex); triggers an async fetch.
+    LookupAccount(String),
+    /// Result of an account lookup delivered by the account worker.
+    AccountViewLoaded(Box<AccountInfo>),
 }

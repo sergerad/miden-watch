@@ -30,10 +30,14 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Build rows as (label, value) pairs — value is what gets copied
-    let rows: Vec<(String, String)> = vec![
+    let mut rows: Vec<(String, String)> = vec![
         ("Note ID".to_string(), note.note_id.clone()),
         ("Block Number".to_string(), format!("#{}", note.block_num)),
         ("Note Index".to_string(), format!("{}", note.note_index)),
+        (
+            "Standard".to_string(),
+            note.standard_type.clone().unwrap_or_else(|| "—".to_string()),
+        ),
         ("Type".to_string(), note.note_type.clone()),
         (
             "Tag".to_string(),
@@ -41,6 +45,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         ),
         ("Sender".to_string(), note.sender.clone()),
     ];
+    if let Some(target) = &note.target {
+        rows.push(("Addressed To".to_string(), target.clone()));
+    }
 
     // Store rows in app for copy support
     app.detail_rows = rows.clone();
@@ -52,13 +59,16 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
                 Color::Green
             } else if label == "Sender" {
                 Color::Cyan
-            } else if label == "Type" {
+            } else if label == "Addressed To" {
+                Color::Magenta
+            } else if label == "Type" || label == "Standard" {
                 Color::Yellow
             } else {
                 Color::White
             };
 
-            let display_value = if label == "Note ID" || label == "Sender" {
+            let display_value = if label == "Note ID" || label == "Sender" || label == "Addressed To"
+            {
                 fmt_hash(value)
             } else {
                 value.clone()

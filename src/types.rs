@@ -59,6 +59,39 @@ pub struct NoteInfo {
     pub note_type: String,
     pub tag: u32,
     pub note_index: u32,
+    /// Standard note kind (P2ID/P2IDE/SWAP/PSWAP/MINT/BURN) for public notes, else None.
+    pub standard_type: Option<String>,
+    /// For public P2ID/P2IDE notes, the addressee account id (hex), else None.
+    pub target: Option<String>,
+}
+
+/// Live public state of an account, fetched on demand from the node.
+#[derive(Debug, Clone)]
+pub struct AccountLiveState {
+    pub nonce: String,
+    pub num_assets: usize,
+    pub assets: Vec<String>,
+    pub storage_commitment: String,
+}
+
+/// A flattened account view: local history plus (optional) live public state.
+#[derive(Debug, Clone)]
+pub struct AccountInfo {
+    pub account_id: String,
+    /// Account type string (regular/faucet), from AccountId::account_type().
+    pub account_type: String,
+    /// Whether the account has public on-chain state.
+    pub is_public: bool,
+    /// Live public state; None for private accounts or when the fetch returned nothing.
+    pub live_state: Option<AccountLiveState>,
+    /// RPC error text, if the live-state fetch failed (local history is still shown).
+    pub error: Option<String>,
+    /// Transactions authored by this account (local, from observed blocks).
+    pub txs: Vec<TransactionInfo>,
+    /// Notes created by this account (sender == id).
+    pub sent_notes: Vec<NoteInfo>,
+    /// Notes addressed to this account (P2ID/P2IDE target == id).
+    pub received_notes: Vec<NoteInfo>,
 }
 
 impl BlockInfo {

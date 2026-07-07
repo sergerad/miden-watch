@@ -1,3 +1,4 @@
+mod account_detail;
 mod block_detail;
 mod block_list;
 mod error_log;
@@ -43,12 +44,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Pane::NoteDetail => {
                 note_detail::render(frame, app, chunks[0]);
             }
+            Pane::AccountDetail => {
+                account_detail::render(frame, app, chunks[0]);
+            }
         }
     }
 
     status_bar::render(frame, app, chunks[1]);
 
-    if app.search_input.is_some() {
+    if app.input.is_some() {
         render_search_input(frame, app, chunks[0]);
     }
 
@@ -61,7 +65,7 @@ fn render_help_popup(frame: &mut Frame) {
     let area = frame.area();
 
     let popup_width = 50u16.min(area.width.saturating_sub(4));
-    let popup_height = 30u16.min(area.height.saturating_sub(4));
+    let popup_height = 34u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -107,8 +111,20 @@ fn render_help_popup(frame: &mut Frame) {
             Span::styled("Switch focus: txs/notes", desc_style),
         ]),
         Line::from(vec![
+            Span::styled("  ←/→ ↑/↓     ", key_style),
+            Span::styled("Move between block/txs/notes", desc_style),
+        ]),
+        Line::from(vec![
             Span::styled("  /           ", key_style),
             Span::styled("Search by block number", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  @           ", key_style),
+            Span::styled("Look up an account by id", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter       ", key_style),
+            Span::styled("On Sender/Account ID: open account", desc_style),
         ]),
         Line::from(vec![
             Span::styled("  f           ", key_style),
@@ -166,8 +182,18 @@ fn render_help_popup(frame: &mut Frame) {
 }
 
 fn render_search_input(frame: &mut Frame, app: &App, area: Rect) {
-    let input = app.search_input.as_deref().unwrap_or("");
-    let text = format!("/ {input}█");
+    let (buffer, prompt, title) = match &app.input {
+        Some(state) => match state.kind {
+            crate::app::InputKind::BlockSearch => {
+                (state.buffer.as_str(), "/", " Go to block ")
+            }
+            crate::app::InputKind::AccountSearch => {
+                (state.buffer.as_str(), "@", " Look up account ")
+            }
+        },
+        None => ("", "/", " Go to block "),
+    };
+    let text = format!("{prompt} {buffer}█");
 
     let width = (text.len() as u16 + 4).max(20).min(area.width);
     let x = (area.width.saturating_sub(width)) / 2;
@@ -182,7 +208,7 @@ fn render_search_input(frame: &mut Frame, app: &App, area: Rect) {
     )))
     .block(
         Block::default()
-            .title(" Go to block ")
+            .title(title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan)),
     );

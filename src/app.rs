@@ -9,7 +9,22 @@ use tokio::sync::mpsc;
 
 use crate::action::Action;
 use crate::event::Event;
-use crate::types::{BlockInfo, NoteInfo, TransactionInfo};
+use crate::types::{AccountInfo, BlockInfo, NoteInfo, TransactionInfo};
+
+/// What the shared search/lookup input box is currently collecting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputKind {
+    /// A block number (digits only).
+    BlockSearch,
+    /// An account id (hex).
+    AccountSearch,
+}
+
+#[derive(Debug, Clone)]
+pub struct InputState {
+    pub kind: InputKind,
+    pub buffer: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockFilter {
@@ -44,6 +59,7 @@ pub enum Pane {
     BlockDetail,
     TxDetail,
     NoteDetail,
+    AccountDetail,
 }
 
 /// Which sub-panel has focus within the BlockDetail view.
@@ -74,6 +90,8 @@ struct NavEntry {
     detail_scroll: u16,
     detail_focus: DetailFocus,
     detail_row_selected: Option<usize>,
+    /// The account id shown when `pane == AccountDetail`.
+    account_id: Option<String>,
 }
 
 pub struct App {
@@ -94,6 +112,12 @@ pub struct App {
     pub should_quit: bool,
     #[allow(dead_code)]
     pub action_tx: mpsc::UnboundedSender<Action>,
+    /// Sender for account-lookup requests handled by the account worker task.
+    acct_req_tx: mpsc::UnboundedSender<String>,
+    /// The account id currently shown/awaited in the AccountDetail pane.
+    pub pending_account: Option<String>,
+    /// Cache of loaded account views, keyed by account id.
+    pub account_views: HashMap<String, AccountInfo>,
     pub detail_scroll: u16,
     /// Tracks a pending 'g' keypress for the gg sequence
     pending_g: bool,
@@ -105,8 +129,8 @@ pub struct App {
     nav_forward: Vec<NavEntry>,
     /// Sync progress for status bar display
     pub sync_progress: Option<(u32, u32)>,
-    /// Search input state: when Some, the user is typing a block number
-    pub search_input: Option<String>,
+    /// Shared search/lookup input: when Some, the user is typing a block number or an account id
+    pub input: Option<InputState>,
     /// Active block list filter
     pub filter: BlockFilter,
     /// Block number and time of the most recently received block (for flash highlight)
@@ -132,7 +156,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(action_tx: mpsc::UnboundedSender<Action>, network: String) -> Self {
+    pub fn new(
+        action_tx: mpsc::UnboundedSender<Action>,
+        acct_req_tx: mpsc::UnboundedSender<String>,
+        network: String,
+    ) -> Self {
         Self {
             active_pane: Pane::BlockList,
             blocks: Vec::new(),
@@ -149,6 +177,9 @@ impl App {
             show_error_log: false,
             should_quit: false,
             action_tx,
+            acct_req_tx,
+            pending_account: None,
+            account_views: HashMap::new(),
             detail_scroll: 0,
             pending_g: false,
             count_buf: String::new(),
@@ -156,7 +187,7 @@ impl App {
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
             sync_progress: None,
-            search_input: None,
+            input: None,
             filter: BlockFilter::All,
             last_received_block: None,
             load_progress: None,
@@ -202,27 +233,44 @@ impl App {
             };
         }
 
-        // When search input is active, handle typing
-        if let Some(ref mut input) = self.search_input {
+        // When the search/lookup input is active, handle typing
+        if let Some(ref mut state) = self.input {
             match key.code {
                 KeyCode::Esc => {
-                    self.search_input = None;
+                    self.input = None;
                     return None;
                 }
                 KeyCode::Enter => {
-                    let result = input.parse::<u32>().ok();
-                    self.search_input = None;
-                    return result.map(Action::SearchBlock);
+                    let state = self.input.take().unwrap();
+                    return match state.kind {
+                        InputKind::BlockSearch => {
+                            state.buffer.parse::<u32>().ok().map(Action::SearchBlock)
+                        }
+                        InputKind::AccountSearch => {
+                            let id = state.buffer.trim().to_string();
+                            if id.is_empty() {
+                                None
+                            } else {
+                                Some(Action::LookupAccount(id))
+                            }
+                        }
+                    };
                 }
                 KeyCode::Backspace => {
-                    input.pop();
-                    if input.is_empty() {
-                        self.search_input = None;
+                    state.buffer.pop();
+                    if state.buffer.is_empty() {
+                        self.input = None;
                     }
                     return None;
                 }
-                KeyCode::Char(c) if c.is_ascii_digit() => {
-                    input.push(c);
+                KeyCode::Char(c) => {
+                    let accept = match state.kind {
+                        InputKind::BlockSearch => c.is_ascii_digit(),
+                        InputKind::AccountSearch => c.is_ascii_hexdigit() || c == 'x',
+                    };
+                    if accept {
+                        state.buffer.push(c);
+                    }
                     return None;
                 }
                 _ => return None,
@@ -237,6 +285,15 @@ impl App {
         // ! opens error log
         if key.code == KeyCode::Char('!') {
             return Some(Action::ToggleErrorLog);
+        }
+
+        // @ opens the account-lookup input from any pane
+        if key.code == KeyCode::Char('@') {
+            self.input = Some(InputState {
+                kind: InputKind::AccountSearch,
+                buffer: String::new(),
+            });
+            return None;
         }
 
         // Ctrl key combinations
@@ -305,7 +362,10 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
                 KeyCode::Char('/') => {
-                    self.search_input = Some(String::new());
+                    self.input = Some(InputState {
+                        kind: InputKind::BlockSearch,
+                        buffer: String::new(),
+                    });
                     None
                 }
                 KeyCode::Char('f') => Some(Action::CycleFilter),
@@ -313,12 +373,28 @@ impl App {
             },
             Pane::BlockDetail => match key.code {
                 KeyCode::Char('q') => Some(Action::Quit),
-                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
-                    Some(Action::Back)
+                KeyCode::Esc | KeyCode::Backspace => Some(Action::Back),
+                // Left: from the Txs/Notes column, move to the Block panel; from Block, go back.
+                KeyCode::Char('h') | KeyCode::Left => {
+                    if self.detail_focus == DetailFocus::Block {
+                        Some(Action::Back)
+                    } else {
+                        self.focus_panel(DetailFocus::Block);
+                        None
+                    }
+                }
+                // Right: from the Block panel, move into the Txs column; elsewhere, drill in.
+                KeyCode::Char('l') | KeyCode::Right => {
+                    if self.detail_focus == DetailFocus::Block {
+                        self.focus_panel(DetailFocus::Txs);
+                        None
+                    } else {
+                        Some(Action::Enter)
+                    }
                 }
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
-                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
+                KeyCode::Enter => Some(Action::Enter),
                 KeyCode::Char('e') => Some(Action::ToggleExpandHashes),
                 KeyCode::Char('y') => Some(Action::CopyHash),
                 _ => None,
@@ -342,6 +418,19 @@ impl App {
                 }
                 KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
                 KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
+                KeyCode::Char('e') => Some(Action::ToggleExpandHashes),
+                KeyCode::Char('y') => Some(Action::CopyHash),
+                _ => None,
+            },
+            Pane::AccountDetail => match key.code {
+                KeyCode::Char('q') => Some(Action::Quit),
+                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                    Some(Action::Back)
+                }
+                KeyCode::Char('j') | KeyCode::Down => Some(Action::Down(count)),
+                KeyCode::Char('k') | KeyCode::Up => Some(Action::Up(count)),
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::Enter),
                 KeyCode::Char('e') => Some(Action::ToggleExpandHashes),
                 KeyCode::Char('y') => Some(Action::CopyHash),
                 _ => None,
@@ -380,9 +469,22 @@ impl App {
                         Pane::BlockDetail => match self.detail_focus {
                             DetailFocus::Block => self.select_prev_detail_row(n),
                             DetailFocus::Txs => self.select_prev_tx(n),
-                            DetailFocus::Notes => self.select_prev_note(n),
+                            DetailFocus::Notes => {
+                                // At the top of the Notes list, flow up into the Txs panel.
+                                let at_top = match self.note_list_state.selected() {
+                                    Some(i) => i == 0,
+                                    None => true,
+                                };
+                                if at_top && !self.selected_block_txs.is_empty() {
+                                    self.detail_focus = DetailFocus::Txs;
+                                    self.tx_list_state
+                                        .select(Some(self.selected_block_txs.len() - 1));
+                                } else {
+                                    self.select_prev_note(n);
+                                }
+                            }
                         },
-                        Pane::TxDetail | Pane::NoteDetail => {
+                        Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                             self.select_prev_detail_row(n);
                         }
                     }
@@ -401,10 +503,22 @@ impl App {
                         }
                         Pane::BlockDetail => match self.detail_focus {
                             DetailFocus::Block => self.select_next_detail_row(n),
-                            DetailFocus::Txs => self.select_next_tx(n),
+                            DetailFocus::Txs => {
+                                // At the bottom of the Txs list, flow down into the Notes panel.
+                                let at_bottom = match self.tx_list_state.selected() {
+                                    Some(i) => i + 1 >= self.selected_block_txs.len(),
+                                    None => true,
+                                };
+                                if at_bottom && !self.selected_block_notes.is_empty() {
+                                    self.detail_focus = DetailFocus::Notes;
+                                    self.note_list_state.select(Some(0));
+                                } else {
+                                    self.select_next_tx(n);
+                                }
+                            }
                             DetailFocus::Notes => self.select_next_note(n),
                         },
-                        Pane::TxDetail | Pane::NoteDetail => {
+                        Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                             self.select_next_detail_row(n);
                         }
                     }
@@ -444,8 +558,15 @@ impl App {
                     }
                 },
                 Pane::TxDetail => {
-                    // Enter in TxDetail: navigate to NoteDetail if there are notes
-                    if !self.selected_block_notes.is_empty() {
+                    // Enter on the "Account ID" row opens the account view; otherwise (on any
+                    // other row) fall back to navigating to the block's notes.
+                    let account = self
+                        .selected_detail_row()
+                        .filter(|(label, _)| label == "Account ID")
+                        .map(|(_, value)| value);
+                    if let Some(id) = account {
+                        self.open_account(id);
+                    } else if !self.selected_block_notes.is_empty() {
                         self.push_nav();
                         if self.note_list_state.selected().is_none() {
                             self.note_list_state.select(Some(0));
@@ -453,7 +574,38 @@ impl App {
                         self.enter_detail_view(Pane::NoteDetail);
                     }
                 }
-                _ => {}
+                Pane::NoteDetail => {
+                    // Enter on the Sender / Addressed To row opens that account's view.
+                    let account = self
+                        .selected_detail_row()
+                        .filter(|(label, _)| label == "Sender" || label == "Addressed To")
+                        .map(|(_, value)| value);
+                    if let Some(id) = account {
+                        self.open_account(id);
+                    }
+                }
+                Pane::AccountDetail => {
+                    // Enter on a listed transaction or note row drills into its detail view.
+                    if let Some((_, value)) = self.selected_detail_row() {
+                        let tx = self
+                            .selected_account()
+                            .and_then(|a| a.txs.iter().find(|t| t.tx_id == value).cloned());
+                        if let Some(tx) = tx {
+                            self.open_account_tx(tx);
+                        } else {
+                            let note = self.selected_account().and_then(|a| {
+                                a.sent_notes
+                                    .iter()
+                                    .chain(a.received_notes.iter())
+                                    .find(|n| n.note_id == value)
+                                    .cloned()
+                            });
+                            if let Some(note) = note {
+                                self.open_account_note(note);
+                            }
+                        }
+                    }
+                }
             },
             Action::Back => match self.active_pane {
                 Pane::BlockDetail => {
@@ -462,8 +614,25 @@ impl App {
                     self.active_pane = Pane::BlockList;
                 }
                 Pane::TxDetail | Pane::NoteDetail => {
-                    self.push_nav();
-                    self.active_pane = Pane::BlockDetail;
+                    // Return to wherever we drilled in from (a block, or an account view).
+                    if let Some(entry) = self.nav_back.pop() {
+                        self.nav_forward.push(self.nav_snapshot());
+                        self.restore_nav(entry);
+                    } else {
+                        self.active_pane = Pane::BlockDetail;
+                    }
+                    self.detail_scroll = 0;
+                }
+                Pane::AccountDetail => {
+                    // The account view can be reached from many places, so return to wherever
+                    // we came from via the navigation history.
+                    self.pending_account = None;
+                    if let Some(entry) = self.nav_back.pop() {
+                        self.nav_forward.push(self.nav_snapshot());
+                        self.restore_nav(entry);
+                    } else {
+                        self.active_pane = Pane::BlockList;
+                    }
                     self.detail_scroll = 0;
                 }
                 Pane::BlockList => {}
@@ -550,7 +719,7 @@ impl App {
                         self.note_list_state.select(Some(target));
                     }
                 },
-                Pane::TxDetail | Pane::NoteDetail => {
+                Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                     self.select_prev_detail_row(HALF_PAGE);
                 }
             },
@@ -583,7 +752,7 @@ impl App {
                         }
                     }
                 },
-                Pane::TxDetail | Pane::NoteDetail => {
+                Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                     self.select_next_detail_row(HALF_PAGE);
                 }
             },
@@ -611,7 +780,7 @@ impl App {
                         }
                     }
                 },
-                Pane::TxDetail | Pane::NoteDetail => {
+                Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                     if !self.detail_rows.is_empty() {
                         self.detail_row_state.select(Some(0));
                     }
@@ -645,7 +814,7 @@ impl App {
                         }
                     }
                 },
-                Pane::TxDetail | Pane::NoteDetail => {
+                Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                     if !self.detail_rows.is_empty() {
                         self.detail_row_state
                             .select(Some(self.detail_rows.len() - 1));
@@ -724,6 +893,14 @@ impl App {
                     }
                 }
             }
+            Action::LookupAccount(id) => {
+                self.open_account(id);
+            }
+            Action::AccountViewLoaded(info) => {
+                // Cache every result (keyed by id); the AccountDetail render reads by
+                // pending_account, so stale/superseded results simply never become visible.
+                self.account_views.insert(info.account_id.clone(), *info);
+            }
         }
     }
 
@@ -746,7 +923,61 @@ impl App {
             detail_scroll: self.detail_scroll,
             detail_focus: self.detail_focus,
             detail_row_selected: self.detail_row_state.selected(),
+            account_id: self.pending_account.clone(),
         }
+    }
+
+    /// The currently highlighted (label, value) row in a detail view, if any.
+    fn selected_detail_row(&self) -> Option<(String, String)> {
+        self.detail_row_state
+            .selected()
+            .and_then(|i| self.detail_rows.get(i).cloned())
+    }
+
+    /// Open the AccountDetail pane for `id` and request its data from the account worker.
+    /// A cached view (if present) renders immediately; the fresh result replaces it on arrival.
+    fn open_account(&mut self, id: String) {
+        self.push_nav();
+        self.active_pane = Pane::AccountDetail;
+        self.pending_account = Some(id.clone());
+        self.detail_scroll = 0;
+        self.detail_row_state = ListState::default();
+        self.detail_row_state.select(Some(0));
+        self.detail_rows.clear();
+        let _ = self.acct_req_tx.send(id);
+    }
+
+    /// Drill from an account's listed transaction into TxDetail, loading that tx's block context.
+    /// Falls back to the account's own copy of the tx if the block isn't held in memory.
+    fn open_account_tx(&mut self, tx: TransactionInfo) {
+        self.push_nav();
+        self.browse_block(tx.block_num);
+        match self.selected_block_txs.iter().position(|t| t.tx_id == tx.tx_id) {
+            Some(idx) => self.tx_list_state.select(Some(idx)),
+            None => {
+                self.selected_block_txs = vec![tx];
+                self.tx_list_state.select(Some(0));
+            }
+        }
+        self.enter_detail_view(Pane::TxDetail);
+    }
+
+    /// Drill from an account's listed note into NoteDetail, loading that note's block context.
+    fn open_account_note(&mut self, note: NoteInfo) {
+        self.push_nav();
+        self.browse_block(note.block_num);
+        match self
+            .selected_block_notes
+            .iter()
+            .position(|n| n.note_id == note.note_id)
+        {
+            Some(idx) => self.note_list_state.select(Some(idx)),
+            None => {
+                self.selected_block_notes = vec![note];
+                self.note_list_state.select(Some(0));
+            }
+        }
+        self.enter_detail_view(Pane::NoteDetail);
     }
 
     fn push_nav(&mut self) {
@@ -774,6 +1005,15 @@ impl App {
             self.note_list_state = ListState::default();
             self.note_list_state.select(entry.note_list_selected);
         }
+
+        // Restore an account view: show the cached copy and re-request in case it was evicted.
+        self.pending_account = entry.account_id.clone();
+        if let Some(id) = entry.account_id {
+            if entry.pane == Pane::AccountDetail && !self.account_views.contains_key(&id) {
+                let _ = self.acct_req_tx.send(id);
+            }
+        }
+
         self.detail_row_state = ListState::default();
         self.detail_row_state.select(entry.detail_row_selected);
     }
@@ -880,6 +1120,30 @@ impl App {
         self.tx_list_state.select(Some(i));
     }
 
+    /// Move focus to one of the BlockDetail sub-panels, initializing its selection if needed.
+    fn focus_panel(&mut self, focus: DetailFocus) {
+        self.detail_focus = focus;
+        match focus {
+            DetailFocus::Block => {
+                if self.detail_row_state.selected().is_none() && !self.detail_rows.is_empty() {
+                    self.detail_row_state.select(Some(0));
+                }
+            }
+            DetailFocus::Txs => {
+                if self.tx_list_state.selected().is_none() && !self.selected_block_txs.is_empty() {
+                    self.tx_list_state.select(Some(0));
+                }
+            }
+            DetailFocus::Notes => {
+                if self.note_list_state.selected().is_none()
+                    && !self.selected_block_notes.is_empty()
+                {
+                    self.note_list_state.select(Some(0));
+                }
+            }
+        }
+    }
+
     fn select_next_error(&mut self, n: usize) {
         if self.error_log.is_empty() {
             return;
@@ -949,6 +1213,13 @@ impl App {
             .and_then(|i| self.selected_block_notes.get(i))
     }
 
+    /// The account view currently shown in the AccountDetail pane, if it has loaded.
+    pub fn selected_account(&self) -> Option<&AccountInfo> {
+        self.pending_account
+            .as_ref()
+            .and_then(|id| self.account_views.get(id))
+    }
+
     fn select_next_note(&mut self, n: usize) {
         if self.selected_block_notes.is_empty() {
             return;
@@ -1012,7 +1283,7 @@ impl App {
                 DetailFocus::Txs => self.selected_tx().map(|t| t.tx_id.clone()),
                 DetailFocus::Notes => self.selected_note().map(|n| n.note_id.clone()),
             },
-            Pane::TxDetail | Pane::NoteDetail => {
+            Pane::TxDetail | Pane::NoteDetail | Pane::AccountDetail => {
                 // Copy the value of the highlighted row
                 self.detail_row_state
                     .selected()
